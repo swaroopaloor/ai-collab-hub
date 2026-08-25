@@ -16,28 +16,97 @@ export const roleValidator = v.union(
 );
 export type Role = Infer<typeof roleValidator>;
 
+// ---- Multiplayer session engine ----
+
+export const SESSION_STATES = [
+  "running",
+  "paused",
+  "awaiting_input",
+  "done",
+] as const;
+export const sessionStateValidator = v.union(
+  ...SESSION_STATES.map((s) => v.literal(s)),
+);
+
+export const PARTICIPANT_ROLES = ["driver", "copilot", "observer"] as const;
+export const participantRoleValidator = v.union(
+  ...PARTICIPANT_ROLES.map((r) => v.literal(r)),
+);
+
+export const EVENT_TYPES = [
+  "message", // human message
+  "agent_message", // agent reply
+  "agent_tool_call", // agent tool invocation
+  "intervention", // human interrupt / control change
+  "system", // joins, state changes
+  "summary", // AI catch-up recap
+] as const;
+
 const schema = defineSchema(
   {
     // default auth tables using convex auth.
     ...authTables, // do not remove or modify
 
-    // the users table is the default users table that is brought in by the authTables
     users: defineTable({
-      name: v.optional(v.string()), // name of the user. do not remove
-      image: v.optional(v.string()), // image of the user. do not remove
-      email: v.optional(v.string()), // email of the user. do not remove
-      emailVerificationTime: v.optional(v.number()), // email verification time. do not remove
-      isAnonymous: v.optional(v.boolean()), // is the user anonymous. do not remove
+      name: v.optional(v.string()),
+      image: v.optional(v.string()),
+      email: v.optional(v.string()),
+      emailVerificationTime: v.optional(v.number()),
+      isAnonymous: v.optional(v.boolean()),
 
-      role: v.optional(roleValidator), // role of the user. do not remove
-    }).index("email", ["email"]), // index for the email. do not remove or modify
+      role: v.optional(roleValidator),
+    }).index("email", ["email"]),
 
-    // add other tables here
+    sessions: defineTable({
+      title: v.string(),
+      artifactType: v.literal("chat"), // v1: chat room module only
+      state: sessionStateValidator,
+      joinCode: v.string(),
+      createdBy: v.id("users"),
+      createdAt: v.number(),
+      // live agent activity, ephemeral: e.g. { label: "researching X..." }
+      agentActivity: v.optional(v.string()),
+    })
+      .index("by_joinCode", ["joinCode"])
+      .index("by_createdAt", ["createdAt"]),
 
-    // tableName: defineTable({
-    //   ...
-    //   // table fields
-    // }).index("by_field", ["field"])
+    participants: defineTable({
+      sessionId: v.id("sessions"),
+      userId: v.id("users"),
+      role: participantRoleValidator,
+      joinedAt: v.number(),
+    })
+      .index("by_session", ["sessionId"])
+      .index("by_session_user", ["sessionId", "userId"]),
+
+    events: defineTable({
+      sessionId: v.id("sessions"),
+      seq: v.number(), // append-only order within session
+      type: v.union(...EVENT_TYPES.map((t) => v.literal(t))),
+      authorType: v.union(v.literal("human"), v.literal("agent"), v.literal("system")),
+      authorId: v.optional(v.id("users")),
+      authorName: v.string(),
+      content: v.string(),
+      // attribution for agent events: "prompted by @name"
+      promptedBy: v.optional(v.string()),
+      // for tool calls: which tool + result
+      toolName: v.optional(v.string()),
+    })
+      .index("by_session_seq", ["sessionId", "seq"]),
+
+    presence: defineTable({
+      sessionId: v.id("sessions"),
+      tabId: v.string(), // per browser-tab identity
+      userId: v.id("users"),
+      name: v.string(),
+      color: v.string(),
+      cursorX: v.number(), // normalized 0..1
+      cursorY: v.number(),
+      focus: v.optional(v.string()), // what this participant is looking at
+      updatedAt: v.number(),
+    })
+      .index("by_session", ["sessionId"])
+      .index("by_session_tab", ["sessionId", "tabId"]),
   },
   {
     schemaValidation: false,

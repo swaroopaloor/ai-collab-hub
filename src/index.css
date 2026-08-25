@@ -42,27 +42,27 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/* CHANGE VALUES FOR THEME */
+/* Neobrutalism Minimalism — square corners, black borders, flat blocks */
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --radius: 0rem;
+  --background: #fafaf7;
+  --foreground: #111111;
+  --card: #ffffff;
+  --card-foreground: #111111;
+  --popover: #ffffff;
+  --popover-foreground: #111111;
+  --primary: #ffd400;
+  --primary-foreground: #111111;
+  --secondary: #EDEDE8;
+  --secondary-foreground: #111111;
+  --muted: #f0f0eb;
+  --muted-foreground: #5b5b56;
+  --accent: #d9f99d;
+  --accent-foreground: #111111;
+  --destructive: #ff5c5c;
+  --border: #111111;
+  --input: #111111;
+  --ring: #111111;
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -118,9 +118,38 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "ss01";
+  }
+
+  h1, h2, h3, h4 {
+    letter-spacing: -0.02em;
   }
   button:not([disabled]),
   [role="button"]:not([disabled]) {
     cursor: pointer;
   }
+}
+
+/* ---- Neobrutalism Minimalism utilities ---- */
+.nb-border {
+  border: 2px solid var(--foreground);
+}
+.nb-shadow {
+  box-shadow: 4px 4px 0 0 var(--foreground);
+}
+.nb-shadow-sm {
+  box-shadow: 2px 2px 0 0 var(--foreground);
+}
+.nb-lift {
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+.nb-lift:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 6px 6px 0 0 var(--foreground);
+}
+.nb-lift:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 0 var(--foreground);
 }
