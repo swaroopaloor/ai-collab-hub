@@ -59,7 +59,6 @@ export const postMessage = mutation({
     const session = await ctx.db.get(sessionId);
     if (!session) throw new Error("Session not found");
 
-    const wasAgentActive = session.state === "running";
     await appendEvent(ctx, sessionId, {
       type: "message",
       authorType: "human",
@@ -69,12 +68,10 @@ export const postMessage = mutation({
     });
 
     // @mention triggers an agent turn. If the agent is already mid-turn,
-    // the running action picks this message up as a live interruption.
-    if (AGENT_MENTION.test(trimmed) && session.state !== "done" && !wasAgentActive) {
-      if (session.state === "paused") {
-        // Paused: don't wake the agent.
-        return;
-      }
+    // the running action picks this message up as a live interruption;
+    // scheduling another turn here covers the race where the current one
+    // just finished — the loop exits harmlessly if there is nothing pending.
+    if (AGENT_MENTION.test(trimmed) && session.state !== "done" && session.state !== "paused") {
       await ctx.db.patch(sessionId, {
         state: "running",
         agentActivity: "Claude is reading the thread...",
