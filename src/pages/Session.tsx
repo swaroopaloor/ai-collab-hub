@@ -1,5 +1,6 @@
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { STATE_STYLES, StatusChip } from "@/pages/Dashboard";
 import {
   ArrowLeft,
@@ -17,7 +18,7 @@ import { useNavigate, useParams } from "react-router";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 
-const AGENT_NAME = "Claude";
+const AGENT_NAME = "ox-alpha";
 const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 type SessionData = {
@@ -269,8 +270,7 @@ export default function Session() {
         <div className="ml-auto flex items-center gap-2">
           <span className="nb-border hidden bg-secondary px-2 py-1 text-[10px] font-bold md:inline">
             CODE {session.joinCode}
-          </span>
-          {(myRole === "driver" || myRole === "copilot") &&
+          </span>          {(myRole === "driver" || myRole === "copilot") &&
             session.state !== "done" && (
               <>
                 {session.state === "paused" ? (
@@ -282,7 +282,7 @@ export default function Session() {
                         state: "awaiting_input",
                       })
                     }
-                    className="nb-border nb-lift h-8 bg-[#D9F99D] font-bold"
+                    className="nb-border nb-lift h-8 bg-[#D9F99D] font-bold text-black"
                   >
                     <Play className="size-3.5" /> Resume
                   </Button>
@@ -327,6 +327,7 @@ export default function Session() {
             )}
             Share
           </Button>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -334,11 +335,11 @@ export default function Session() {
       <div className="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[260px_1fr]">
         {/* Sidebar */}
         <aside className="nb-border hidden flex-col overflow-y-auto border-b-0 border-l-0 bg-card lg:flex">
-          <p className="border-b-2 border-black px-4 py-2.5 text-[10px] font-black uppercase tracking-widest">
+          <p className="border-b-2 border-foreground px-4 py-2.5 text-[10px] font-black uppercase tracking-widest">
             Participants · {(session.participants.length ?? 0)}
           </p>
           {/* Agent */}
-          <div className="flex items-start gap-2.5 border-b-2 border-black px-4 py-3">
+          <div className="flex items-start gap-2.5 border-b-2 border-foreground px-4 py-3">
             <span
               className={`nb-border mt-0.5 flex size-7 shrink-0 items-center justify-center ${
                 agentActive
@@ -366,10 +367,10 @@ export default function Session() {
           {session.participants.map((p) => (
             <div
               key={p._id}
-              className="flex items-center gap-2.5 border-b border-black/10 px-4 py-2.5"
+              className="flex items-center gap-2.5 border-b border-foreground/10 px-4 py-2.5"
             >
               <span
-                className="mt-0.5 flex size-7 shrink-0 items-center justify-center border-2 border-black text-[10px] font-black text-black"
+                className="mt-0.5 flex size-7 shrink-0 items-center justify-center nb-border text-[10px] font-black text-black"
                 style={{ background: presenceColorFor(p.userId) }}
               >
                 {p.name.slice(0, 1).toUpperCase()}
@@ -389,7 +390,7 @@ export default function Session() {
                       role: e.target.value as "driver" | "copilot" | "observer",
                     })
                   }
-                  className="cursor-pointer border-2 border-black bg-white px-1 py-0.5 text-[10px] font-bold"
+                  className="cursor-pointer nb-border bg-card px-1 py-0.5 text-[10px] font-bold"
                   aria-label="Change your role"
                 >
                   <option value="driver">→ driver</option>
@@ -434,7 +435,7 @@ export default function Session() {
                   <p className="font-bold">Kick things off</p>
                   <p className="mt-1 text-sm text-muted-foreground">
                     Post a message and include{" "}
-                    <code className="bg-secondary px-1 font-bold">@claude</code>{" "}
+                    <code className="bg-secondary px-1 font-bold">@ox-alpha</code>{" "}
                     to bring the agent into the conversation.
                   </p>
                 </div>
@@ -465,9 +466,9 @@ export default function Session() {
                       ? "Read-only — request control below to post"
                       : session.state === "done"
                         ? "This session is done"
-                        : "Message everyone. Use @claude to prompt the agent."
+                        : "Message everyone. Use @ox-alpha to prompt the agent."
                 }
-                className="nb-border h-10 flex-1 bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus:shadow-[2px_2px_0_0_#111]"
+                className="nb-border h-10 flex-1 bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus:shadow-[2px_2px_0_0_#111] dark:focus:shadow-[2px_2px_0_0_#f5f5f0]"
               />
               {canPost ? (
                 <Button
@@ -527,7 +528,7 @@ function EventRow({ ev }: { ev: EventData }) {
         <div className="max-w-[85%] self-end">
           <p className="mb-0.5 text-right text-[10px] font-black tracking-wide text-muted-foreground">
             <span className="rounded-none bg-primary px-1 py-px text-black">
-              CLAUDE
+              {AGENT_NAME.toUpperCase()}
             </span>
             {ev.promptedBy ? (
               <span className="ml-1 normal-case">prompted by @{ev.promptedBy}</span>
@@ -555,7 +556,7 @@ function EventRow({ ev }: { ev: EventData }) {
     case "intervention":
       return (
         <div className="self-center">
-          <div className="nb-border w-fit bg-[#FFD9B3] px-3 py-1.5 text-xs font-semibold">
+          <div className="nb-border w-fit bg-[#FFD9B3] px-3 py-1.5 text-xs font-semibold text-black">
             ⚡ {ev.content}
           </div>
         </div>
@@ -565,7 +566,7 @@ function EventRow({ ev }: { ev: EventData }) {
         <div className="nb-border nb-shadow bg-accent px-4 py-3">
           <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest">
             <Sparkles className="size-3.5" />
-            Catch-up summary by Claude
+            Catch-up summary by ox-alpha
           </p>
           <p className="mt-1.5 text-sm leading-relaxed">{ev.content}</p>
         </div>

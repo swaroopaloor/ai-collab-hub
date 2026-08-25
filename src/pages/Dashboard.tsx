@@ -3,6 +3,7 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   ArrowRight,
   Check,
@@ -48,7 +49,7 @@ export const STATE_STYLES: Record<
   },
   done: {
     label: "DONE",
-    className: "bg-[#E5E5DF] text-black",
+    className: "bg-[#E5E5DF] text-black dark:bg-[#3a3a3a]",
     dot: "#55554F",
   },
 };
@@ -128,6 +129,7 @@ export default function Dashboard() {
           <span className="hidden text-xs font-medium text-muted-foreground sm:block">
             {user?.name ?? user?.email ?? "Guest"}
           </span>
+          <ThemeToggle />
           <Button
             variant="outline"
             size="sm"
@@ -145,7 +147,7 @@ export default function Dashboard() {
           Sessions
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Live rooms where your team and Claude work in one shared thread.
+          Live rooms where your team and ox-alpha work in one shared thread.
         </p>
 
         {/* Create / Join panel */}
@@ -194,12 +196,12 @@ export default function Dashboard() {
                 onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                 placeholder="ABC123"
                 maxLength={6}
-                className="nb-border h-10 bg-white uppercase placeholder:normal-case"
+                className="nb-border h-10 bg-card uppercase placeholder:normal-case"
               />
               <Button
                 type="submit"
                 disabled={joinCode.length < 4}
-                className="nb-border nb-lift h-10 bg-white px-4 font-bold"
+                className="nb-border nb-lift h-10 bg-card px-4 font-bold"
               >
                 Join
                 <ArrowRight className="size-4" />
