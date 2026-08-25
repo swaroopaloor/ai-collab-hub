@@ -4,7 +4,7 @@ import { mutation, query } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { appendEvent } from "./sessions";
 
-/** Ask Claude for a catch-up recap (used when joining a session in progress). */
+/** Ask ox-alpha for a catch-up recap (used when joining a session in progress). */
 export const requestSummary = mutation({
   args: { sessionId: v.id("sessions") },
   handler: async (ctx, { sessionId }) => {
@@ -19,7 +19,7 @@ export const requestSummary = mutation({
   },
 });
 
-const AGENT_MENTION = /@(claude|agent)\b/i;
+const AGENT_MENTION = /@(claude|agent|ox[- ]?alpha)\b/i;
 
 export const listEvents = query({
   args: { sessionId: v.id("sessions") },
@@ -74,7 +74,7 @@ export const postMessage = mutation({
     if (AGENT_MENTION.test(trimmed) && session.state !== "done" && session.state !== "paused") {
       await ctx.db.patch(sessionId, {
         state: "running",
-        agentActivity: "Claude is reading the thread...",
+        agentActivity: "ox-alpha is reading the thread...",
       });
       await ctx.scheduler.runAfter(0, internal.agent.runTurn, { sessionId });
     }
