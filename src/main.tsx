@@ -9,6 +9,7 @@ import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
+import AppPresenceBar from "./components/AppPresenceBar";
 
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import("./pages/Landing.tsx"));
@@ -17,6 +18,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const Session = lazy(() => import("./pages/Session.tsx"));
 const JoinByCode = lazy(() => import("./pages/JoinByCode.tsx"));
 const Compare = lazy(() => import("./pages/Compare.tsx"));
+const Radar = lazy(() => import("./pages/Radar.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -122,6 +124,7 @@ createRoot(document.getElementById("root")!).render(
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         <BrowserRouter>
           <RouteSyncer />
+          <AppPresenceBar />
           <Suspense fallback={<RouteLoading />}>
             <Routes>
               <Route path="/" element={<Landing />} />
@@ -150,6 +153,14 @@ createRoot(document.getElementById("root")!).render(
                 element={
                   <RequireAuth>
                     <Session />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/radar"
+                element={
+                  <RequireAuth>
+                    <Radar />
                   </RequireAuth>
                 }
               />

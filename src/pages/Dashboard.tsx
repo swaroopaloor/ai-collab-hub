@@ -12,6 +12,7 @@ import {
   Plus,
   Users,
   Hash,
+  Radio,
 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router";
@@ -129,6 +130,15 @@ export default function Dashboard() {
           <span className="hidden text-xs font-medium text-muted-foreground sm:block">
             {user?.name ?? user?.email ?? "Guest"}
           </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate("/radar")}
+            className="nb-border gap-1.5 bg-card px-2.5 text-xs font-bold"
+          >
+            <Radio className="size-3.5" />
+            Radar
+          </Button>
           <ThemeToggle />
           <Button
             variant="outline"
