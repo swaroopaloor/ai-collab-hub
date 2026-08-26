@@ -154,7 +154,7 @@ export default function Landing() {
               ))}
             </div>
 
-            <div className="mt-8 flex flex-wrap gap-3">
+            <div className="mt-8 flex items-center gap-3">
               <Button
                 onClick={() => navigate(isAuthenticated ? "/dashboard" : "/auth")}
                 className="nb-border nb-lift h-12 bg-primary px-6 text-base font-black text-black"
@@ -275,7 +275,7 @@ export default function Landing() {
             <div className="flex flex-wrap items-center justify-center gap-3">
               <Button
                 onClick={() => navigate(isAuthenticated ? "/dashboard" : "/auth")}
-                className="nb-border nb-lift mt-2 h-12 bg-primary px-8 text-base font-black text-black"
+                className="nb-border nb-lift h-12 bg-primary px-8 text-base font-black text-black"
               >
                 Get started
                 <ArrowRight className="ml-2 size-4" />
