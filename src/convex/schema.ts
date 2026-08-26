@@ -69,6 +69,10 @@ const schema = defineSchema(
       createdAt: v.number(),
       // live agent activity, ephemeral: e.g. { label: "researching X..." }
       agentActivity: v.optional(v.string()),
+      // Autonomous operation: scope set by last driver, agent continues without humans.
+      autonomousScope: v.optional(v.string()), // e.g. "full" | "research_only" | "off"
+      lastActivityAt: v.optional(v.number()),
+      handoffCount: v.number(),
       // Time travel lineage: set when this session was forked from a parent.
       parentId: v.optional(v.id("sessions")),
       forkedAtSeq: v.optional(v.number()), // parent timeline position of the fork

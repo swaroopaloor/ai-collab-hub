@@ -2,6 +2,8 @@ import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import ReviewGatePanel from "@/components/ReviewGatePanel";
+import AwayBriefing from "@/components/AwayBriefing";
+import HandoffDialog from "@/components/HandoffDialog";
 import { STATE_STYLES, StatusChip } from "@/pages/Dashboard";
 import {
   ArrowLeft,
@@ -21,6 +23,7 @@ import {
   Sparkles,
   Square,
   Wrench,
+  Zap,
   CheckCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -42,6 +45,9 @@ export type SessionData = {
   parentId?: string | null;
   forkedAtSeq?: number | null;
   parentTitle?: string | null;
+  autonomousScope?: string | null;
+  lastActivityAt?: number;
+  handoffCount?: number;
   participants: Array<{
     _id: string;
     userId: string;
@@ -136,6 +142,7 @@ export default function Session() {
   const leavePresence = useMutation(api.presence.leave);
   const setMyRole = useMutation(api.sessions.setMyRole);
   const setSessionState = useMutation(api.sessions.setSessionState);
+  const setAutonomousScope = useMutation(api.sessions.setAutonomousScope);
   const requestSummary = useMutation(api.events.requestSummary);
   const joinSessionMut = useMutation(api.sessions.joinSession);
   const forkSessionMut = useMutation(api.sessions.forkSession);
@@ -429,9 +436,22 @@ export default function Session() {
             )}
             Share
           </Button>
+          {myRole === "driver" && (
+            <div className="relative">
+              <HandoffDialog
+                sessionId={sessionId as string}
+                participants={session.participants}
+              />
+            </div>
+          )}
           <ThemeToggle />
         </div>
       </header>
+
+      {/* Away briefing */}
+      {!timeTraveling && (
+        <AwayBriefing sessionId={sessionId as string} />
+      )}
 
       {/* Fork lineage banner */}
       {session.parentId && (
@@ -540,6 +560,38 @@ export default function Session() {
               )}
             </div>
           ))}
+
+          {(myRole === "driver" || myRole === "copilot") && (
+            <div className="border-t border-foreground/10 p-4">
+              <p className="mb-1.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                <Zap className="mr-1 inline size-3" />
+                Autonomous mode
+              </p>
+              <div className="flex gap-1">
+                {["off", "research_only", "full"].map((scope) => (
+                  <button
+                    key={scope}
+                    onClick={() =>
+                      void setAutonomousScope({
+                        sessionId: session._id as never,
+                        scope,
+                      })
+                    }
+                    className={`nb-border flex-1 px-1.5 py-1 text-[9px] font-bold ${
+                      (session.autonomousScope ?? "off") === scope
+                        ? "bg-primary text-black"
+                        : "bg-background hover:bg-secondary"
+                    }`}
+                  >
+                    {scope === "off" ? "Off" : scope === "research_only" ? "Research" : "Full"}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-[9px] text-muted-foreground">
+                Agent continues working when no one is present.
+              </p>
+            </div>
+          )}
 
           <div className="mt-auto p-4">
             <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -731,10 +783,27 @@ export default function Session() {
 
           {/* State legend strip */}
           <div
-            className={`nb-border shrink-0 border-x-0 border-b-0 px-4 py-1 text-center text-[10px] font-black uppercase tracking-widest ${stateStyle.className}`}
+            className={`nb-border flex shrink-0 items-center justify-center gap-3 border-x-0 border-b-0 px-4 py-1 text-[10px] font-black uppercase tracking-widest ${stateStyle.className}`}
           >
-            {stateStyle.label}
-            {agentActive && " · live"}
+            <span>{stateStyle.label}</span>
+            {agentActive && (
+              <span className="flex items-center gap-1">
+                <span className="size-1.5 animate-pulse rounded-full bg-current" />
+                live
+              </span>
+            )}
+            {session.autonomousScope && session.autonomousScope !== "off" && (
+              <span className="flex items-center gap-1">
+                <Zap className="size-2.5" />
+                autonomous: {session.autonomousScope}
+              </span>
+            )}
+            {(session.handoffCount ?? 0) > 0 && (
+              <span className="flex items-center gap-1">
+                <GitFork className="size-2.5" />
+                {session.handoffCount} handoff{(session.handoffCount ?? 0) !== 1 ? "s" : ""}
+              </span>
+            )}
           </div>
         </div>
       </div>

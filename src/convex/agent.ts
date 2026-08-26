@@ -386,8 +386,18 @@ export const runTurn = internalAction({
             (e.type === "message" || e.type === "intervention"),
         );
         if (pendingHuman.length === 0 && conversation.length > 1) {
-          // Nothing left to respond to.
-          break;
+          // Check autonomous scope: if set and no humans present, continue working.
+          const autonomousScope = session.autonomousScope;
+          if (autonomousScope && autonomousScope !== "off") {
+            // Autonomous mode: keep working even without human prompts.
+            conversation.push({
+              role: "user",
+              content: `[AUTONOMOUS MODE — scope: ${autonomousScope}] No humans are currently present. Continue working on the session's goals autonomously. Make progress, save findings to Team Memory, and propose changes via gates. Do NOT send chat messages — only use tools and proposals.`,
+            });
+          } else {
+            // Nothing left to respond to.
+            break;
+          }
         }
 
         // Attribution: who prompted this turn (last human to @mention).

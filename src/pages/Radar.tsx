@@ -31,6 +31,8 @@ type SessionCard = {
   participantCount: number;
   participantNames: Array<{ name: string; role: string }>;
   isMember: boolean;
+  handoffCount?: number;
+  autonomousScope?: string | null;
 };
 
 type FeedEvent = {
@@ -83,6 +85,16 @@ function timeAgo(ms: number): string {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function formatDuration(createdAt: number): string {
+  const ms = Date.now() - createdAt;
+  const days = Math.floor(ms / 86400000);
+  const hours = Math.floor((ms % 86400000) / 3600000);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h`;
+  const mins = Math.floor((ms % 3600000) / 60000);
+  return `${mins}m`;
 }
 
 function SessionCardView({
@@ -172,9 +184,17 @@ function SessionCardView({
         <span className="nb-border bg-secondary px-1.5 py-0.5 text-[9px] font-bold">
           CODE {session.joinCode}
         </span>
-        <span className="text-[10px] text-muted-foreground">
-          {timeAgo(session.createdAt)}
-        </span>
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          {(session.handoffCount ?? 0) > 0 && (
+            <span className="flex items-center gap-0.5 font-bold">
+              <GitFork className="size-2.5" />
+              {session.handoffCount} handoff{(session.handoffCount ?? 0) !== 1 ? "s" : ""}
+            </span>
+          )}
+          <span className="font-bold">
+            Running for {formatDuration(session.createdAt)}
+          </span>
+        </div>
       </div>
     </button>
   );

@@ -52,6 +52,8 @@ export async function appendEvent(
     .first();
   const seq = (last?.seq ?? 0) + 1;
   await ctx.db.insert("events", { sessionId, seq, ...event });
+  // Track last activity for autonomous mode and away-briefing detection.
+  await ctx.db.patch(sessionId, { lastActivityAt: Date.now() } as never);
 }
 
 // ---- Queries ----
@@ -120,6 +122,10 @@ export const getSession = query({
       parentTitle: session.parentId
         ? (await ctx.db.get(session.parentId))?.title ?? null
         : null,
+      // Autonomous operation
+      autonomousScope: session.autonomousScope ?? null,
+      lastActivityAt: session.lastActivityAt ?? session.createdAt,
+      handoffCount: session.handoffCount,
       participants: parts.map((p, i) => ({
         _id: p._id,
         userId: p.userId,
@@ -174,6 +180,7 @@ export const createSession = mutation({
       joinCode: makeJoinCode(),
       createdBy: userId,
       createdAt: now,
+      handoffCount: 0,
     });
     await ctx.db.insert("participants", {
       sessionId,
@@ -351,6 +358,7 @@ export const forkSession = mutation({
       createdAt: now,
       parentId: sessionId,
       forkedAtSeq: uptoSeq,
+      handoffCount: 0,
     });
 
     // 2. Full state copy: participants keep their roles.
@@ -434,6 +442,166 @@ export const internalSetActivity = internalMutation({
     if (state !== undefined) patch.state = state;
     if (Object.keys(patch).length > 0)
       await ctx.db.patch(sessionId, patch as never);
+  },
+});
+
+// ---- Handoff ----
+
+export const handoffSession = mutation({
+  args: {
+    sessionId: v.id("sessions"),
+    toUserId: v.id("users"),
+    note: v.string(),
+  },
+  handler: async (ctx, { sessionId, toUserId, note }) => {
+    const userId = await requireUserId(ctx);
+    const me = await ctx.db
+      .query("participants")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", sessionId).eq("userId", userId),
+      )
+      .first();
+    if (!me || me.role !== "driver")
+      throw new Error("Only drivers can hand off");
+
+    const user = await ctx.db.get(userId);
+    const toUser = await ctx.db.get(toUserId);
+    const fromName = user?.name ?? user?.email ?? "Someone";
+    const toName = toUser?.name ?? toUser?.email ?? "someone";
+
+    // Add receiver as driver if not already a participant.
+    const existing = await ctx.db
+      .query("participants")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", sessionId).eq("userId", toUserId),
+      )
+      .first();
+    if (existing) {
+      await ctx.db.patch(existing._id, { role: "driver" });
+    } else {
+      await ctx.db.insert("participants", {
+        sessionId,
+        userId: toUserId,
+        role: "driver",
+        joinedAt: Date.now(),
+      });
+    }
+
+    // Downgrade the handoff-er to co-pilot.
+    await ctx.db.patch(me._id, { role: "copilot" });
+
+    // Increment handoff counter.
+    const session = await ctx.db.get(sessionId);
+    await ctx.db.patch(sessionId, {
+      handoffCount: (session?.handoffCount ?? 0) + 1,
+    } as never);
+
+    await appendEvent(ctx, sessionId, {
+      type: "intervention",
+      authorType: "human",
+      authorId: userId,
+      authorName: fromName,
+      content: `handed off to ${toName}: "${note}"`,
+    });
+  },
+});
+
+// ---- Autonomous scope ----
+
+export const setAutonomousScope = mutation({
+  args: {
+    sessionId: v.id("sessions"),
+    scope: v.string(), // "full" | "research_only" | "off"
+  },
+  handler: async (ctx, { sessionId, scope }) => {
+    const userId = await requireUserId(ctx);
+    const me = await ctx.db
+      .query("participants")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", sessionId).eq("userId", userId),
+      )
+      .first();
+    if (!me || (me.role !== "driver" && me.role !== "copilot"))
+      throw new Error("Only drivers or co-pilots can set autonomous scope");
+
+    await ctx.db.patch(sessionId, { autonomousScope: scope } as never);
+    const user = await ctx.db.get(userId);
+    await appendEvent(ctx, sessionId, {
+      type: "system",
+      authorType: "human",
+      authorId: userId,
+      authorName: user?.name ?? user?.email ?? "Someone",
+      content: `set autonomous mode to "${scope}"`,
+    });
+  },
+});
+
+// ---- Away briefing ----
+
+/** Generate a briefing of what happened since the user was last active. */
+export const getAwayBriefing = query({
+  args: {
+    sessionId: v.id("sessions"),
+    lastSeenAt: v.number(),
+  },
+  handler: async (ctx, { sessionId, lastSeenAt }) => {
+    const events = await ctx.db
+      .query("events")
+      .withIndex("by_session_seq", (q) => q.eq("sessionId", sessionId))
+      .order("asc")
+      .take(500);
+
+    // Events after the user's last activity
+    const newEvents = events.filter((e) => e.seq > 0); // all events
+    const recentEvents = newEvents.filter((e) => {
+      const creationTime = e._creationTime;
+      return creationTime > lastSeenAt;
+    });
+
+    if (recentEvents.length === 0) return null;
+
+    const agentActions = recentEvents.filter(
+      (e) => e.authorType === "agent",
+    );
+    const humanActions = recentEvents.filter(
+      (e) => e.authorType === "human",
+    );
+    const proposals = recentEvents.filter((e) => e.type === "proposal");
+    const decisions = recentEvents.filter((e) => e.type === "gate_decision");
+
+    const summaryParts: string[] = [];
+    if (agentActions.length > 0) {
+      summaryParts.push(
+        `Agent made ${agentActions.length} action(s): ${agentActions
+          .slice(0, 3)
+          .map((e) => e.content.slice(0, 60))
+          .join("; ")}`,
+      );
+    }
+    if (proposals.length > 0) {
+      summaryParts.push(`${proposals.length} change(s) proposed awaiting review`);
+    }
+    if (decisions.length > 0) {
+      summaryParts.push(`${decisions.length} review decision(s) made`);
+    }
+    if (humanActions.length > 0) {
+      summaryParts.push(
+        `${humanActions.length} human interaction(s) while you were away`,
+      );
+    }
+
+    return {
+      eventCount: recentEvents.length,
+      summary: summaryParts.join(". "),
+      hasPendingProposals: proposals.some((_, i) => {
+        const gate = recentEvents.find(
+          (e) =>
+            e.type === "gate_decision" &&
+            e.content.includes(recentEvents[i]?.content ?? ""),
+        );
+        return !gate;
+      }),
+    };
   },
 });
 
