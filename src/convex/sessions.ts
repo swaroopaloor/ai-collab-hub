@@ -15,7 +15,7 @@ export const COLORS = [
   "#00C2C7",
 ];
 
-function makeJoinCode(): string {
+export function makeJoinCode(): string {
   const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   let code = "";
   for (let i = 0; i < 6; i++) {

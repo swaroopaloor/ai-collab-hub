@@ -2,12 +2,20 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import TimeTravelDemo from "@/components/TimeTravelDemo";
+import GuidedDemo from "@/components/GuidedDemo";
 import {
   ArrowRight,
+  Brain,
   Bot,
+  Clock,
+  Eye,
   GitBranch,
+  GitFork,
   History,
   MousePointer2,
+  Play,
+  Radio,
+  Shield,
   ShieldHalf,
   Users,
   Zap,
@@ -19,64 +27,70 @@ const FEATURES = [
     icon: MousePointer2,
     color: "#FF5C5C",
     title: "Live presence",
-    body: "Every cursor and focus state is broadcast in real time. You always know who is looking at what.",
+    body: "Every cursor and focus state broadcast in real time. You always know who is looking at what.",
   },
   {
     icon: Bot,
     color: "#FFD400",
     title: "AI in the thread",
-    body: "@mention the agent to pull it into the conversation. Every action is attributed to who prompted it.",
+    body: "@mention the agent to pull it in. Every action attributed to who prompted it.",
   },
   {
     icon: Zap,
     color: "#4DA6FF",
     title: "Interrupt anytime",
-    body: "Send a message mid-turn to redirect the agent. It folds your interruption in without losing the plot.",
+    body: "Send a message mid-turn to redirect the agent. It folds your interruption in seamlessly.",
   },
   {
     icon: History,
     color: "#2ECC71",
     title: "Time travel",
-    body: "Scrub the entire session back to any past moment. See exactly how things looked, then branch from there.",
+    body: "Scrub the timeline to any past moment, then fork a fresh branch from there.",
   },
   {
     icon: GitBranch,
     color: "#B57BFF",
-    title: "Fork & branch",
-    body: "Create a new session from any timeline position — like branching code. Original is untouched.",
+    title: "Fork & compare",
+    body: "Branch sessions like code. Compare what-ifs side by side with synced timelines.",
   },
   {
-    icon: ShieldHalf,
+    icon: Shield,
     color: "#FF9440",
-    title: "Compare runs",
-    body: "Side-by-side synced timelines. See what if we'd redirected the agent vs. letting it continue?",
+    title: "Approval gates",
+    body: "Agent proposes changes that pause for review. Diff UI, edit-before-approve, reject with comment.",
+  },
+  {
+    icon: Radio,
+    color: "#00C2C7",
+    title: "Radar dashboard",
+    body: "Org-wide mission control. See every active session, who's in it, and what the agent is doing.",
+  },
+  {
+    icon: Brain,
+    color: "#B57BFF",
+    title: "Team memory",
+    body: "Agents learn durable facts across sessions. Searchable, editable, cited in future conversations.",
+  },
+  {
+    icon: Clock,
+    color: "#2ECC71",
+    title: "Continuous sessions",
+    body: "Agent keeps working autonomously across handoffs. 'While you were away' briefings on return.",
   },
 ];
 
-const STEPS_DATA = [
+const WHY_NOW = [
   {
-    num: "01",
-    title: "Start a session",
-    color: "#FF5C5C",
-    body: "Give it a name, hit create. You get a shareable link and a 6-character join code.",
+    stat: "seconds → hours",
+    label: "Agent tasks now span hours or days, not seconds",
   },
   {
-    num: "02",
-    title: "Collaborate live",
-    color: "#FFD400",
-    body: "Team members join instantly. Everyone's cursor is visible. @mention the AI to bring it in.",
+    stat: "1 → many",
+    label: "Work needs to be shared by a whole team, not one person's chat",
   },
   {
-    num: "03",
-    title: "Scrub & fork",
-    color: "#4DA6FF",
-    body: "Drag the timeline scrubber to any past event. Click 'Fork from here' to branch a fresh session.",
-  },
-  {
-    num: "04",
-    title: "Compare what-ifs",
-    color: "#B57BFF",
-    body: "Open the compare view to see original and fork side by side, timeline synced.",
+    stat: "static → branchable",
+    label: "Every session is time-travelable and forkable, like code",
   },
 ];
 
@@ -117,17 +131,29 @@ export default function Landing() {
               Humans + AI · one live session
             </span>
             <h1 className="mt-5 text-5xl font-black leading-[0.95] tracking-tight sm:text-6xl">
-              Your team + AI.
+              Agent work is
               <br />
               <span className="bg-primary px-2 box-decoration-clone">
-                One shared room.
+                becoming team work.
               </span>
             </h1>
             <p className="mt-5 max-w-lg text-base leading-relaxed text-muted-foreground">
-              Multiplayer makes AI work a team sport. Create a session, share a
-              link, and collaborate with live cursors, clear roles, and an agent
-              that works in the open — interruptible at any moment.
+              AI tasks have gone from seconds to hours and days. Work needs to be
+              <strong> watchable, steerable, and shared</strong> by a whole
+              team — not locked in one person's private chat window. Multiplayer
+              makes that real.
             </p>
+
+            {/* Why-now stats */}
+            <div className="mt-6 flex flex-wrap gap-3">
+              {WHY_NOW.map((w) => (
+                <div key={w.stat} className="nb-border bg-card px-3 py-2">
+                  <p className="text-sm font-black">{w.stat}</p>
+                  <p className="text-[10px] text-muted-foreground">{w.label}</p>
+                </div>
+              ))}
+            </div>
+
             <div className="mt-8 flex flex-wrap gap-3">
               <Button
                 onClick={() => navigate(isAuthenticated ? "/dashboard" : "/auth")}
@@ -136,17 +162,11 @@ export default function Landing() {
                 Create a session
                 <ArrowRight className="ml-2 size-4" />
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => navigate(isAuthenticated ? "/dashboard" : "/auth")}
-                className="nb-border nb-lift h-12 bg-card px-6 text-base font-bold"
-              >
-                Join with a code
-              </Button>
+              <GuidedDemo />
             </div>
           </div>
 
-          {/* Hero mock — static session preview */}
+          {/* Hero mock */}
           <div className="nb-border nb-shadow bg-card">
             <div className="nb-border flex h-10 items-center gap-2 border-x-0 border-t-0 bg-secondary px-3">
               <span className="size-2 bg-[#FF5C5C]" />
@@ -196,56 +216,15 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* How it works — step-by-step */}
+        {/* Features grid */}
         <section className="pb-16">
           <h2 className="text-2xl font-black uppercase tracking-tight sm:text-3xl">
-            How it works
+            Everything your team needs
           </h2>
           <p className="mt-2 max-w-md text-sm text-muted-foreground">
-            Four steps from zero to a full collaborative AI session with time travel.
+            One platform where humans and AI collaborate live, with full
+            visibility and control.
           </p>
-          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {STEPS_DATA.map((s) => (
-              <div key={s.num} className="nb-border nb-shadow bg-card p-5">
-                <span
-                  className="nb-border mb-3 flex h-8 w-12 items-center justify-center font-mono text-sm font-black"
-                  style={{ background: s.color }}
-                >
-                  {s.num}
-                </span>
-                <h3 className="font-black uppercase">{s.title}</h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-                  {s.body}
-                </p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Interactive Time Travel demo */}
-        <section className="pb-20">
-          <div className="mb-6 flex items-end justify-between">
-            <div>
-              <h2 className="text-2xl font-black uppercase tracking-tight sm:text-3xl">
-                See it in action
-              </h2>
-              <p className="mt-2 max-w-md text-sm text-muted-foreground">
-                Watch how time travel, forking, and compare work — scrub any
-                timeline, branch a fresh agent run, compare what-ifs side by side.
-              </p>
-            </div>
-            <span className="nb-border hidden bg-[#2ECC71] px-2 py-1 text-[10px] font-black uppercase tracking-widest sm:inline">
-              animated demo
-            </span>
-          </div>
-          <TimeTravelDemo />
-        </section>
-
-        {/* Features grid */}
-        <section className="pb-20">
-          <h2 className="text-2xl font-black uppercase tracking-tight sm:text-3xl">
-            Built for teams moving fast
-          </h2>
           <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((f) => (
               <div key={f.title} className="nb-border nb-shadow bg-card p-5">
@@ -264,6 +243,25 @@ export default function Landing() {
           </div>
         </section>
 
+        {/* Interactive demo */}
+        <section className="pb-20">
+          <div className="mb-6 flex items-end justify-between">
+            <div>
+              <h2 className="text-2xl font-black uppercase tracking-tight sm:text-3xl">
+                See it in action
+              </h2>
+              <p className="mt-2 max-w-md text-sm text-muted-foreground">
+                Watch how time travel, forking, approval gates, and team memory
+                work together in a live session.
+              </p>
+            </div>
+            <span className="nb-border hidden bg-[#2ECC71] px-2 py-1 text-[10px] font-black uppercase tracking-widest sm:inline">
+              interactive demo
+            </span>
+          </div>
+          <TimeTravelDemo />
+        </section>
+
         {/* CTA */}
         <section className="pb-24">
           <div className="nb-border nb-shadow flex flex-col items-center gap-4 bg-accent px-6 py-12 text-center">
@@ -271,15 +269,19 @@ export default function Landing() {
               Stop chatting with AI alone
             </h2>
             <p className="max-w-md text-sm font-medium text-foreground/80">
-              Spin up a session in seconds. Invite your team. Bring the agent. Branch it when things get interesting.
+              Spin up a session in seconds. Invite your team. Bring the agent.
+              Branch it when things get interesting.
             </p>
-            <Button
-              onClick={() => navigate(isAuthenticated ? "/dashboard" : "/auth")}
-              className="nb-border nb-lift mt-2 h-12 bg-primary px-8 text-base font-black text-black"
-            >
-              Get started
-              <ArrowRight className="ml-2 size-4" />
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <Button
+                onClick={() => navigate(isAuthenticated ? "/dashboard" : "/auth")}
+                className="nb-border nb-lift mt-2 h-12 bg-primary px-8 text-base font-black text-black"
+              >
+                Get started
+                <ArrowRight className="ml-2 size-4" />
+              </Button>
+              <GuidedDemo />
+            </div>
           </div>
         </section>
       </main>

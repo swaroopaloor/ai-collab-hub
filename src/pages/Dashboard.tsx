@@ -15,7 +15,7 @@ import {
   Hash,
   Radio,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
@@ -75,10 +75,20 @@ export default function Dashboard() {
     | SessionRow[]
     | undefined;
   const createSession = useMutation(api.sessions.createSession);
+  const seedDemo = useMutation(api.seed.seedDemoData);
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+
+  // Auto-seed demo data on first load.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && sessions !== undefined && sessions.length === 0) {
+      seeded.current = true;
+      void seedDemo().catch(() => {});
+    }
+  }, [sessions, seedDemo]);
 
   const handleCreate = async () => {
     if (!title.trim() || creating) return;
