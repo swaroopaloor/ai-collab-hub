@@ -41,6 +41,8 @@ export const EVENT_TYPES = [
   "system", // joins, state changes
   "summary", // AI catch-up recap
   "fork", // branch marker: a new session was forked from this point
+  "proposal", // agent proposes a change gated for review
+  "gate_decision", // reviewer approves / rejects / edits a gate
 ] as const;
 
 const schema = defineSchema(
@@ -100,6 +102,30 @@ const schema = defineSchema(
       childSessionId: v.optional(v.id("sessions")),
     })
       .index("by_session_seq", ["sessionId", "seq"]),
+
+    // Approval gates: agent proposes a change → pauses → reviewers decide.
+    approvalGates: defineTable({
+      sessionId: v.id("sessions"),
+      eventId: v.id("events"), // the timeline event that triggered this gate
+      status: v.union(
+        v.literal("pending"),
+        v.literal("approved"),
+        v.literal("rejected"),
+        v.literal("edited"),
+      ),
+      artifactType: v.string(), // "code", "text", "structured", etc.
+      title: v.string(),
+      beforeContent: v.string(), // original state (text, JSON, diff source)
+      afterContent: v.string(), // proposed new state
+      editedContent: v.optional(v.string()), // final content if reviewer edited before approve
+      comment: v.optional(v.string()), // reviewer comment on reject
+      createdBy: v.string(), // agent name that proposed
+      createdAt: v.number(),
+      decidedAt: v.optional(v.number()),
+      decidedBy: v.optional(v.string()),
+    })
+      .index("by_session", ["sessionId"])
+      .index("by_session_status", ["sessionId", "status"]),
 
     presence: defineTable({
       sessionId: v.id("sessions"),

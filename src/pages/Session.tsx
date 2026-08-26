@@ -1,6 +1,7 @@
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import ReviewGatePanel from "@/components/ReviewGatePanel";
 import { STATE_STYLES, StatusChip } from "@/pages/Dashboard";
 import {
   ArrowLeft,
@@ -15,9 +16,12 @@ import {
   Play,
   Radio,
   SkipBack,
+  Shield,
+  ShieldOff,
   Sparkles,
   Square,
   Wrench,
+  CheckCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
@@ -56,7 +60,9 @@ export type EventData = {
     | "intervention"
     | "system"
     | "summary"
-    | "fork";
+    | "fork"
+    | "proposal"
+    | "gate_decision";
   authorType: "human" | "agent" | "system";
   authorName: string;
   content: string;
@@ -585,6 +591,13 @@ export default function Session() {
             </div>
           </div>
 
+          {/* Review gates */}
+          {!timeTraveling && (
+            <div className="mx-auto max-w-2xl px-4 sm:px-8">
+              <ReviewGatePanel sessionId={sessionId as never} />
+            </div>
+          )}
+
           {/* Composer */}
           <div className="nb-border shrink-0 border-x-0 border-b-0 bg-card px-4 py-3 sm:px-8">
             <form
@@ -806,6 +819,35 @@ export function EventRow({ ev }: { ev: EventData }) {
                 View branch →
               </Link>
             )}
+          </div>
+        </div>
+      );
+    case "proposal":
+      return (
+        <div className="max-w-[85%] self-center">
+          <div className="nb-border nb-shadow-sm flex w-fit items-center gap-2 bg-[#FFD400] px-3 py-1.5 text-xs font-bold text-black">
+            <Shield className="size-3.5" />
+            <span>{ev.content}</span>
+          </div>
+          {ev.promptedBy && (
+            <p className="mt-0.5 text-center text-[10px] text-muted-foreground">
+              prompted by @{ev.promptedBy}
+            </p>
+          )}
+        </div>
+      );
+    case "gate_decision":
+      return (
+        <div className="max-w-[85%] self-center">
+          <div className="nb-border nb-shadow-sm flex w-fit items-center gap-2 bg-[#4DA6FF] px-3 py-1.5 text-xs font-bold text-black">
+            {ev.content.includes("approved") ? (
+              <CheckCircle className="size-3.5" />
+            ) : ev.content.includes("rejected") ? (
+              <ShieldOff className="size-3.5" />
+            ) : (
+              <Check className="size-3.5" />
+            )}
+            <span>{ev.authorName} {ev.content}</span>
           </div>
         </div>
       );

@@ -448,6 +448,8 @@ export const internalAppendEvent = internalMutation({
       v.literal("system"),
       v.literal("summary"),
       v.literal("fork"),
+      v.literal("proposal"),
+      v.literal("gate_decision"),
     ),
     authorType: v.union(
       v.literal("human"),

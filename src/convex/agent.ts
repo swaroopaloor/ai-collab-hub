@@ -3,6 +3,7 @@
 import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
+import { type Id } from "./_generated/dataModel";
 
 // ---- Model configuration -------------------------------------------------
 // ox-alpha via any OpenAI-compatible endpoint. Set these env vars once you
@@ -94,6 +95,9 @@ ${TOOL_SPECS.map((t) => `- ${t.name}: ${t.description} Example args: ${t.example
   {"thought": "<one short sentence shown to everyone>", "tool": "<tool name>", "input": "<tool input>"}
 - When you have enough context, reply with ONLY a JSON object:
   {"reply": "<your message to the thread. Be concise and helpful. Address humans by name when responding to them.>"}
+- When you want to propose a change that needs human review (a diff, edit, resolution, or assumption), reply with ONLY:
+  {"proposal": {"title": "<short title>", "artifactType": "<code|text|structured>", "before": "<current state>", "after": "<proposed new state>"}}
+  The system will pause and show a review gate to the team. You will be resumed after they decide.
 - If the conversation contains an [INTERRUPTION] marker, acknowledge the redirect and fold it into your current work — do not lose the original task.
 - Never output anything except a single JSON object.`;
 
@@ -392,6 +396,59 @@ export const runTurn = internalAction({
             content: `Tool result for ${toolName}:\n${result}`,
           });
           continue; // loop: agent can call more tools or answer
+        }
+
+        // Proposal: agent wants a change reviewed before applying.
+        const proposal = parsed.proposal as Record<string, string> | undefined;
+        if (proposal && typeof proposal.title === "string") {
+          const before = String(proposal.before ?? "");
+          const after = String(proposal.after ?? "");
+          const artifactType = String(proposal.artifactType ?? "text");
+          const thoughtMsg = String(parsed.thought ?? `Proposing: ${proposal.title}`);
+
+          // Post the thought as an agent message first.
+          await ctx.runMutation(internal.sessions.internalAppendEvent, {
+            sessionId,
+            type: "agent_message",
+            authorType: "agent",
+            authorName: AGENT_NAME,
+            content: thoughtMsg,
+            promptedBy: attribution,
+          });
+
+          // Post a proposal event and create the gate (both pause the session).
+          await ctx.runMutation(
+            internal.sessions.internalAppendEvent,
+            {
+              sessionId,
+              type: "proposal",
+              authorType: "agent",
+              authorName: AGENT_NAME,
+              content: `proposed: "${proposal.title}" — awaiting review`,
+              promptedBy: attribution,
+            },
+          );
+
+          // Fetch the event we just created to get its ID for the gate.
+          const proposalEvents = (await ctx.runQuery(api.events.listEvents, {
+            sessionId,
+          })) as Array<{ _id: string; type: string; authorName: string }>;
+          const proposalEvent = [...proposalEvents].reverse().find(
+            (e) => e.type === "proposal" && e.authorName === AGENT_NAME,
+          );
+
+          await ctx.runMutation(internal.gates.createGate, {
+            sessionId,
+            eventId: (proposalEvent?._id ?? proposalEvents[proposalEvents.length - 1]?._id) as Id<"events">,
+            artifactType,
+            title: proposal.title,
+            beforeContent: before,
+            afterContent: after,
+            createdBy: AGENT_NAME,
+          });
+
+          // Session is now paused; the turn loop will exit.
+          return;
         }
 
         // Final reply.
