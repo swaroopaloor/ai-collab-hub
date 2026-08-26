@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 
@@ -41,6 +42,7 @@ export async function appendEvent(
     content: string;
     promptedBy?: string;
     toolName?: string;
+    childSessionId?: Id<"sessions">;
   },
 ) {
   const last = await ctx.db
@@ -111,6 +113,13 @@ export const getSession = query({
       joinCode: session.joinCode,
       createdBy: session.createdBy,
       agentActivity: session.agentActivity,
+      createdAt: session.createdAt,
+      // Time travel lineage
+      parentId: session.parentId,
+      forkedAtSeq: session.forkedAtSeq,
+      parentTitle: session.parentId
+        ? (await ctx.db.get(session.parentId))?.title ?? null
+        : null,
       participants: parts.map((p, i) => ({
         _id: p._id,
         userId: p.userId,
@@ -298,6 +307,112 @@ export const setSessionState = mutation({
   },
 });
 
+// ---- Time travel: fork a session at any timeline position ----
+
+/** Create a full copy of the session up to `uptoSeq` (inclusive), with all
+ *  copied events keeping their original sequence numbers so the fork can be
+ *  scrubbed identically. A fresh agent run is kicked off from that point.
+ *  The original session is untouched except for a branch-marker event. */
+export const forkSession = mutation({
+  args: {
+    sessionId: v.id("sessions"),
+    uptoSeq: v.number(),
+  },
+  handler: async (ctx, { sessionId, uptoSeq }) => {
+    const userId = await requireUserId(ctx);
+    const parent = await ctx.db.get(sessionId);
+    if (!parent) throw new Error("Session not found");
+    const me = await ctx.db
+      .query("participants")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", sessionId).eq("userId", userId),
+      )
+      .first();
+    if (!me) throw new Error("Only participants can fork this session");
+
+    const last = await ctx.db
+      .query("events")
+      .withIndex("by_session_seq", (q) => q.eq("sessionId", sessionId))
+      .order("desc")
+      .first();
+    if (!last || uptoSeq < 1 || uptoSeq > last.seq)
+      throw new Error("Invalid timeline position");
+
+    const user = await ctx.db.get(userId);
+    const now = Date.now();
+
+    // 1. The child session, pointing back at its origin.
+    const childId = await ctx.db.insert("sessions", {
+      title: `${parent.title} (fork)`,
+      artifactType: parent.artifactType,
+      state: "running",
+      joinCode: makeJoinCode(),
+      createdBy: userId,
+      createdAt: now,
+      parentId: sessionId,
+      forkedAtSeq: uptoSeq,
+    });
+
+    // 2. Full state copy: participants keep their roles.
+    const parts = await ctx.db
+      .query("participants")
+      .withIndex("by_session", (q) => q.eq("sessionId", sessionId))
+      .collect();
+    for (const p of parts) {
+      await ctx.db.insert("participants", {
+        sessionId: childId,
+        userId: p.userId,
+        role: p.userId === userId && p.role === "observer" ? "copilot" : p.role,
+        joinedAt: now,
+      });
+    }
+
+    // 3. Copy the timeline up to the fork point, preserving seq order.
+    const history = await ctx.db
+      .query("events")
+      .withIndex("by_session_seq", (q) => q.eq("sessionId", sessionId))
+      .take(uptoSeq); // by_session_seq is ordered by seq ascending
+    for (const e of history) {
+      await ctx.db.insert("events", {
+        sessionId: childId,
+        seq: e.seq,
+        type: e.type,
+        authorType: e.authorType,
+        authorId: e.authorId,
+        authorName: e.authorName,
+        content: e.content,
+        promptedBy: e.promptedBy,
+        toolName: e.toolName,
+      });
+    }
+
+    await appendEvent(ctx, childId, {
+      type: "system",
+      authorType: "system",
+      authorName: "System",
+      content: `⑂ ${user?.name ?? user?.email ?? "Someone"} forked this session from "${parent.title}" at timeline position ${uptoSeq}. A fresh agent run starts here.`,
+    });
+
+    // 4. Branch indicator in the parent's timeline.
+    await appendEvent(ctx, sessionId, {
+      type: "fork",
+      authorType: "human",
+      authorId: userId,
+      authorName: user?.name ?? user?.email ?? "Someone",
+      content: `forked this session from here`,
+      childSessionId: childId,
+    });
+
+    // 5. Fresh agent run from the fork point. The turn loop reads the copied
+    //    thread, so the agent resumes with full context but no stale state.
+    await ctx.scheduler.runAfter(0, internal.agent.runTurn, {
+      sessionId: childId,
+    });
+
+    return childId;
+  },
+});
+
 // ---- Internal helpers used by the agent action ----
 
 export const internalSetActivity = internalMutation({
@@ -332,6 +447,7 @@ export const internalAppendEvent = internalMutation({
       v.literal("intervention"),
       v.literal("system"),
       v.literal("summary"),
+      v.literal("fork"),
     ),
     authorType: v.union(
       v.literal("human"),
@@ -342,6 +458,7 @@ export const internalAppendEvent = internalMutation({
     content: v.string(),
     promptedBy: v.optional(v.string()),
     toolName: v.optional(v.string()),
+    childSessionId: v.optional(v.id("sessions")),
   },
   handler: async (ctx, { sessionId, ...event }) => {
     await appendEvent(ctx, sessionId, event);

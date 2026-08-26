@@ -40,6 +40,7 @@ export const EVENT_TYPES = [
   "intervention", // human interrupt / control change
   "system", // joins, state changes
   "summary", // AI catch-up recap
+  "fork", // branch marker: a new session was forked from this point
 ] as const;
 
 const schema = defineSchema(
@@ -66,9 +67,13 @@ const schema = defineSchema(
       createdAt: v.number(),
       // live agent activity, ephemeral: e.g. { label: "researching X..." }
       agentActivity: v.optional(v.string()),
+      // Time travel lineage: set when this session was forked from a parent.
+      parentId: v.optional(v.id("sessions")),
+      forkedAtSeq: v.optional(v.number()), // parent timeline position of the fork
     })
       .index("by_joinCode", ["joinCode"])
-      .index("by_createdAt", ["createdAt"]),
+      .index("by_createdAt", ["createdAt"])
+      .index("by_parent", ["parentId"]),
 
     participants: defineTable({
       sessionId: v.id("sessions"),
@@ -91,6 +96,8 @@ const schema = defineSchema(
       promptedBy: v.optional(v.string()),
       // for tool calls: which tool + result
       toolName: v.optional(v.string()),
+      // for fork events: the child session that was branched off here
+      childSessionId: v.optional(v.id("sessions")),
     })
       .index("by_session_seq", ["sessionId", "seq"]),
 

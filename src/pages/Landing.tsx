@@ -1,7 +1,7 @@
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Bot, MousePointer2, Radio, ShieldHalf, Users, Zap } from "lucide-react";
+import { Bot, History, MousePointer2, ShieldHalf, Users, Zap } from "lucide-react";
 import { useNavigate } from "react-router";
 
 const FEATURES = [
@@ -14,20 +14,20 @@ const FEATURES = [
   {
     icon: Bot,
     color: "#FFD400",
-    title: "ox-alpha in the thread",
+    title: "AI in the thread",
     body: "@mention the agent to pull it into the conversation. Every action it takes is attributed to who prompted it.",
   },
   {
     icon: Zap,
     color: "#4DA6FF",
     title: "Interrupt anytime",
-    body: "Send a message mid-turn to redirect ox-alpha. It folds your interruption in without losing the plot.",
+    body: "Send a message mid-turn to redirect the agent. It folds your interruption in without losing the plot.",
   },
   {
-    icon: Radio,
+    icon: History,
     color: "#2ECC71",
-    title: "One shared timeline",
-    body: "Messages, tool calls, interventions — a persistent append-only log everyone sees identically.",
+    title: "Time travel & fork",
+    body: "Scrub the entire session back to any moment — then branch it like code. Compare what-if runs side by side.",
   },
   {
     icon: Users,
@@ -80,7 +80,7 @@ export default function Landing() {
               Humans + agent · one live session
             </span>
             <h1 className="mt-5 text-5xl font-black leading-[0.95] tracking-tight sm:text-6xl">
-              Your team and ox-alpha.
+              Your team + AI.
               <br />
               <span className="bg-primary px-2 box-decoration-clone">
                 One shared room.
@@ -124,12 +124,12 @@ export default function Landing() {
                   Maya
                 </p>
                 <div className="nb-border nb-shadow-sm w-fit bg-background px-2.5 py-1.5">
-                  @ox-alpha can you check why signups dipped this week?
+                  @agent can you check why signups dipped this week?
                 </div>
               </div>
               <div className="max-w-[85%] justify-end justify-self-end text-right">
                 <p className="text-[9px] font-black uppercase text-muted-foreground">
-                  <span className="bg-primary px-1 py-px text-black">OX-ALPHA</span>{" "}
+                  <span className="bg-primary px-1 py-px text-black">AGENT</span>{" "}
                   prompted by @maya
                 </p>
                 <div className="nb-border nb-shadow-sm ml-auto w-fit bg-primary/90 px-2.5 py-1.5 text-left">

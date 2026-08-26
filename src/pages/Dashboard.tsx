@@ -147,7 +147,7 @@ export default function Dashboard() {
           Sessions
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Live rooms where your team and ox-alpha work in one shared thread.
+          Live rooms where your team and an AI teammate work in one shared thread.
         </p>
 
         {/* Create / Join panel */}
