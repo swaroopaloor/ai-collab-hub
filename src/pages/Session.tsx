@@ -8,25 +8,36 @@ import {
   Check,
   Copy,
   Eye,
+  GitBranch,
+  GitFork,
+  History,
   Pause,
   Play,
+  Radio,
+  SkipBack,
   Sparkles,
+  Square,
   Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 
 const AGENT_NAME = "ox-alpha";
 const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-type SessionData = {
+export type SessionData = {
   _id: string;
   title: string;
   state: "running" | "paused" | "awaiting_input" | "done";
   joinCode: string;
   agentActivity?: string | null;
+  createdAt?: number;
+  // Time travel lineage
+  parentId?: string | null;
+  forkedAtSeq?: number | null;
+  parentTitle?: string | null;
   participants: Array<{
     _id: string;
     userId: string;
@@ -35,15 +46,23 @@ type SessionData = {
   }>;
 };
 
-type EventData = {
+export type EventData = {
   _id: string;
   seq: number;
-  type: "message" | "agent_message" | "agent_tool_call" | "intervention" | "system" | "summary";
+  type:
+    | "message"
+    | "agent_message"
+    | "agent_tool_call"
+    | "intervention"
+    | "system"
+    | "summary"
+    | "fork";
   authorType: "human" | "agent" | "system";
   authorName: string;
   content: string;
   promptedBy?: string | null;
   toolName?: string | null;
+  childSessionId?: string | null;
 };
 
 type PresenceData = {
@@ -113,10 +132,15 @@ export default function Session() {
   const setSessionState = useMutation(api.sessions.setSessionState);
   const requestSummary = useMutation(api.events.requestSummary);
   const joinSessionMut = useMutation(api.sessions.joinSession);
+  const forkSessionMut = useMutation(api.sessions.forkSession);
 
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  // Time travel: null = live edge, otherwise index into the events array.
+  const [viewIndex, setViewIndex] = useState<number | null>(null);
+  const [replaying, setReplaying] = useState(false);
+  const [forking, setForking] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const lastCursorSent = useRef(0);
@@ -197,6 +221,75 @@ export default function Session() {
     [presence],
   );
 
+  // ---- Time travel ----
+  // All slicing is local state over the already-subscribed events array, so
+  // dragging repaints instantly with zero network round-trips.
+  const maxIndex = Math.max((events?.length ?? 1) - 1, 0);
+  const effectiveIndex = viewIndex ?? maxIndex;
+  const timeTraveling = viewIndex !== null && viewIndex < maxIndex;
+
+  const visibleEvents = useMemo(
+    () => (events ?? []).slice(0, effectiveIndex + 1),
+    [events, effectiveIndex],
+  );
+
+  // Reconstruct what the session looked like at the scrub position: walk
+  // backwards through the visible log for the last thing that changed state.
+  const historicalState = useMemo<SessionData["state"] | null>(() => {
+    if (!timeTraveling) return null;
+    for (let i = visibleEvents.length - 1; i >= 0; i--) {
+      const e = visibleEvents[i];
+      if (e.type === "agent_message" || e.type === "agent_tool_call") return "running";
+      if (e.type === "message" || e.type === "intervention") return "awaiting_input";
+      if (e.type === "fork") return "awaiting_input";
+      if (e.type === "system") {
+        if (e.content.includes("paused the agent")) return "paused";
+        if (e.content.includes("marked the session done")) return "done";
+        if (e.content.includes("resumed the agent")) return "running";
+      }
+    }
+    return "awaiting_input";
+  }, [timeTraveling, visibleEvents]);
+
+  const displayState = historicalState ?? session?.state ?? "awaiting_input";
+  const agentActive =
+    !timeTraveling &&
+    (displayState === "running" ||
+      (!!session?.agentActivity && displayState !== "paused"));
+
+  // Replay animation: walk forward through history.
+  useEffect(() => {
+    if (!replaying) return;
+    const t = setInterval(() => {
+      setViewIndex((cur) => Math.min((cur ?? 0) + 1, maxIndex));
+    }, 320);
+    return () => clearInterval(t);
+  }, [replaying, maxIndex]);
+  useEffect(() => {
+    if (viewIndex !== null && viewIndex >= maxIndex) setReplaying(false);
+  }, [viewIndex, maxIndex]);
+
+  const seek = useCallback((i: number) => {
+    setReplaying(false);
+    setViewIndex(i);
+  }, []);
+
+  const handleFork = async () => {
+    if (!sessionId || viewIndex === null || !events) return;
+    setForking(true);
+    try {
+      const childId = await forkSessionMut({
+        sessionId: sessionId as never,
+        uptoSeq: events[viewIndex].seq,
+      });
+      toast.success("Branch created — fresh agent run started");
+      navigate(`/session/${childId}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Fork failed");
+      setForking(false);
+    }
+  };
+
   const handleSend = async () => {
     if (!sessionId || !draft.trim() || sending) return;
     setSending(true);
@@ -240,10 +333,7 @@ export default function Session() {
     );
   }
 
-  const stateStyle = STATE_STYLES[session.state];
-  const agentActive =
-    session.state === "running" ||
-    (!!session.agentActivity && session.state !== "paused");
+  const stateStyle = STATE_STYLES[displayState];
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
@@ -260,7 +350,13 @@ export default function Session() {
         <h1 className="truncate text-sm font-black uppercase tracking-tight sm:text-base">
           {session.title}
         </h1>
-        <StatusChip state={session.state} />
+        <StatusChip state={displayState} />
+        {timeTraveling && (
+          <span className="nb-border hidden items-center gap-1.5 bg-[#4DA6FF] px-2 py-0.5 text-[10px] font-bold text-black sm:inline-flex">
+            <History className="size-3 animate-pulse" />
+            TIME TRAVEL
+          </span>
+        )}
         {agentActive && (
           <span className="nb-border hidden items-center gap-1.5 bg-[#D9F99D] px-2 py-0.5 text-[10px] font-bold sm:inline-flex">
             <Bot className="size-3 animate-pulse" />
@@ -330,6 +426,44 @@ export default function Session() {
           <ThemeToggle />
         </div>
       </header>
+
+      {/* Fork lineage banner */}
+      {session.parentId && (
+        <div className="nb-border flex shrink-0 items-center gap-2 border-x-0 border-t-0 bg-accent px-4 py-1.5 text-xs font-semibold">
+          <GitFork className="size-3.5 shrink-0" />
+          <span className="truncate">
+            Forked from{" "}
+            <Link
+              to={`/session/${session.parentId}`}
+              className="underline decoration-2 underline-offset-2 hover:bg-card"
+            >
+              {session.parentTitle ?? "parent session"}
+            </Link>
+            {session.forkedAtSeq != null && (
+              <>
+                {" "}at position {session.forkedAtSeq}
+              </>
+            )}
+            {session.createdAt != null && (
+              <>
+                {" "}·{" "}
+                {new Date(session.createdAt).toLocaleTimeString([], {
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
+              </>
+            )}
+          </span>
+          <button
+            onClick={() =>
+              navigate(`/compare/${session.parentId}/${session._id}`)
+            }
+            className="nb-border nb-lift ml-auto shrink-0 bg-card px-2 py-0.5 text-[10px] font-bold"
+          >
+            Compare with original
+          </button>
+        </div>
+      )}
 
       {/* Body */}
       <div className="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[260px_1fr]">
@@ -440,9 +574,14 @@ export default function Session() {
                   </p>
                 </div>
               )}
-              {events?.map((ev) => (
-                <EventRow key={ev._id} ev={ev} />
+              {visibleEvents.map((ev) => (
+                <EventRow key={`${ev._id}-${ev.seq}`} ev={ev} />
               ))}
+              {timeTraveling && (
+                <p className="self-center text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  ↓ future events hidden · position {effectiveIndex + 1}/{maxIndex + 1}
+                </p>
+              )}
             </div>
           </div>
 
@@ -458,19 +597,21 @@ export default function Session() {
               <input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                disabled={!canPost}
+                disabled={!canPost || timeTraveling}
                 placeholder={
                   !isMember
                     ? "Joining..."
                     : myRole === "observer"
                       ? "Read-only — request control below to post"
-                      : session.state === "done"
-                        ? "This session is done"
-                        : "Message everyone. Use @ox-alpha to prompt the agent."
+                      : timeTraveling
+                        ? "Time traveling — jump back to LIVE to post"
+                        : displayState === "done"
+                          ? "This session is done"
+                          : "Message everyone. Use @ox-alpha to prompt the agent."
                 }
                 className="nb-border h-10 flex-1 bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus:shadow-[2px_2px_0_0_#111] dark:focus:shadow-[2px_2px_0_0_#f5f5f0]"
               />
-              {canPost ? (
+              {canPost && !timeTraveling ? (
                 <Button
                   type="submit"
                   disabled={!draft.trim() || sending}
@@ -478,7 +619,7 @@ export default function Session() {
                 >
                   Send
                 </Button>
-              ) : (
+              ) : !timeTraveling && (
                 myRole === "observer" && (
                   <Button
                     type="button"
@@ -497,6 +638,84 @@ export default function Session() {
             </form>
           </div>
 
+          {/* Time travel scrubber */}
+          <div className="nb-border flex shrink-0 items-center gap-2 border-x-0 border-b-0 bg-card px-3 py-2 sm:gap-3 sm:px-5">
+            <button
+              onClick={() => seek(0)}
+              disabled={maxIndex === 0}
+              title="Jump to start"
+              aria-label="Jump to start of timeline"
+              className="nb-border nb-lift flex size-7 shrink-0 items-center justify-center bg-secondary disabled:opacity-40"
+            >
+              <SkipBack className="size-3.5" />
+            </button>
+            <button
+              onClick={() => setReplaying((r) => !r)}
+              disabled={maxIndex === 0 || (!timeTraveling && viewIndex === null)}
+              title={replaying ? "Pause replay" : "Replay from here"}
+              aria-label={replaying ? "Pause replay" : "Replay timeline"}
+              className="nb-border nb-lift flex size-7 shrink-0 items-center justify-center bg-primary text-black disabled:opacity-40"
+            >
+              {replaying ? <Square className="size-3" /> : <Play className="size-3.5" />}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={maxIndex}
+              step={1}
+              value={effectiveIndex}
+              onChange={(e) => seek(Number(e.target.value))}
+              disabled={maxIndex === 0}
+              aria-label="Scrub session timeline"
+              className="time-scrubber h-2 min-w-0 flex-1 cursor-pointer appearance-none border-2 border-foreground bg-secondary"
+            />
+            <span className="hidden shrink-0 text-[10px] font-black uppercase tracking-widest sm:inline">
+              {timeTraveling ? (
+                <>
+                  POS {effectiveIndex + 1}/{maxIndex + 1}
+                </>
+              ) : (
+                <>LIVE · {maxIndex + 1} events</>
+              )}
+            </span>
+            {timeTraveling ? (
+              <>
+                <Button
+                  size="sm"
+                  onClick={() => void handleFork()}
+                  disabled={forking}
+                  className="nb-border nb-lift h-7 shrink-0 bg-[#B57BFF] px-2 text-[10px] font-black text-black sm:px-3 sm:text-xs"
+                >
+                  <GitFork className="size-3.5" />
+                  Fork from here
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setReplaying(false);
+                    setViewIndex(null);
+                  }}
+                  className="nb-border nb-lift h-7 shrink-0 bg-[#4DA6FF] px-2 text-[10px] font-black text-black sm:px-3 sm:text-xs"
+                >
+                  <Radio className="size-3.5" />
+                  Live
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setViewIndex(maxIndex - 1)}
+                disabled={maxIndex === 0}
+                title="Step back one event"
+                className="nb-border nb-lift h-7 shrink-0 bg-card px-2 text-[10px] font-bold sm:px-3 sm:text-xs"
+              >
+                <History className="size-3.5" />
+                Rewind
+              </Button>
+            )}
+          </div>
+
           {/* State legend strip */}
           <div
             className={`nb-border shrink-0 border-x-0 border-b-0 px-4 py-1 text-center text-[10px] font-black uppercase tracking-widest ${stateStyle.className}`}
@@ -510,7 +729,7 @@ export default function Session() {
   );
 }
 
-function EventRow({ ev }: { ev: EventData }) {
+export function EventRow({ ev }: { ev: EventData }) {
   switch (ev.type) {
     case "message":
       return (
@@ -569,6 +788,25 @@ function EventRow({ ev }: { ev: EventData }) {
             Catch-up summary by ox-alpha
           </p>
           <p className="mt-1.5 text-sm leading-relaxed">{ev.content}</p>
+        </div>
+      );
+    case "fork":
+      return (
+        <div className="self-center">
+          <div className="nb-border nb-shadow-sm flex w-fit items-center gap-2 bg-[#B57BFF] px-3 py-1.5 text-xs font-bold text-black">
+            <GitBranch className="size-3.5 shrink-0" />
+            <span>
+              ⑂ {ev.authorName} {ev.content}
+            </span>
+            {ev.childSessionId && (
+              <Link
+                to={`/session/${ev.childSessionId}`}
+                className="nb-border ml-1 shrink-0 bg-card px-1.5 py-px text-[10px] font-black hover:bg-secondary"
+              >
+                View branch →
+              </Link>
+            )}
+          </div>
         </div>
       );
     case "system":
