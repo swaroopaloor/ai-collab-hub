@@ -45,7 +45,7 @@ function ChatBubble({ ev, hidden }: { ev: typeof MOCK_EVENTS[0]; hidden?: boolea
     );
   }
   return (
-    <div className={`max-w-[75%] transition-all duration-500 ${hidden ? "scale-90 opacity-0" : "opacity-100"}`}>
+    <div className={`max-w-[75%] self-start transition-all duration-500 ${hidden ? "scale-90 opacity-0" : "opacity-100"}`}>
       <p className="mb-0.5 text-[8px] font-black uppercase text-muted-foreground">{ev.name}</p>
       <div className="nb-border nb-shadow-sm w-fit bg-background px-2.5 py-1.5 text-xs leading-relaxed">
         {ev.text}
@@ -71,7 +71,7 @@ function LiveStep({ visibleCount }: { visibleCount: number }) {
         </span>
       </div>
       {/* Messages */}
-      <div className="flex-1 space-y-2.5 overflow-hidden px-3 py-3">
+      <div className="flex flex-1 flex-col items-stretch gap-2.5 overflow-hidden px-3 py-3">
         {MOCK_EVENTS.slice(0, visibleCount).map((ev) => (
           <ChatBubble key={ev.id} ev={ev} />
         ))}
@@ -118,7 +118,7 @@ function ScrubStep({ scrubTo }: { scrubTo: number }) {
           TIME TRAVEL
         </span>
       </div>
-      <div className="flex-1 space-y-2.5 overflow-hidden px-3 py-3">
+      <div className="flex flex-1 flex-col items-stretch gap-2.5 overflow-hidden px-3 py-3">
         {MOCK_EVENTS.map((ev, i) => (
           <ChatBubble key={ev.id} ev={ev} hidden={i >= visibleCount} />
         ))}
@@ -163,7 +163,7 @@ function ForkStep() {
           at position 4 · fresh agent run
         </span>
       </div>
-      <div className="flex-1 space-y-2.5 overflow-hidden px-3 py-3">
+      <div className="flex flex-1 flex-col items-stretch gap-2.5 overflow-hidden px-3 py-3">
         {MOCK_EVENTS.slice(0, 4).map((ev) => (
           <ChatBubble key={ev.id} ev={ev} />
         ))}
@@ -208,7 +208,7 @@ function CompareStep() {
             <span className="text-[8px] font-black uppercase tracking-widest bg-card px-1">Original</span>
             <span className="text-[8px] font-bold underline">Launch War Room</span>
           </div>
-          <div className="flex-1 space-y-2 overflow-hidden px-2 py-2">
+          <div className="flex flex-1 flex-col items-stretch gap-2 overflow-hidden px-2 py-2">
             {MOCK_EVENTS.slice(0, 5).map((ev) => (
               <ChatBubble key={ev.id} ev={ev} />
             ))}
@@ -220,7 +220,7 @@ function CompareStep() {
             <span className="text-[8px] font-black uppercase tracking-widest bg-[#B57BFF] px-1 text-black">Fork</span>
             <span className="text-[8px] font-bold underline">Launch War Room (fork)</span>
           </div>
-          <div className="flex-1 space-y-2 overflow-hidden px-2 py-2">
+          <div className="flex flex-1 flex-col items-stretch gap-2 overflow-hidden px-2 py-2">
             {MOCK_EVENTS.slice(0, 3).map((ev) => (
               <ChatBubble key={ev.id} ev={ev} />
             ))}
