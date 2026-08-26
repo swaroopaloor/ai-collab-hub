@@ -19,6 +19,7 @@ const Session = lazy(() => import("./pages/Session.tsx"));
 const JoinByCode = lazy(() => import("./pages/JoinByCode.tsx"));
 const Compare = lazy(() => import("./pages/Compare.tsx"));
 const Radar = lazy(() => import("./pages/Radar.tsx"));
+const TeamMemory = lazy(() => import("./pages/TeamMemory.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -161,6 +162,14 @@ createRoot(document.getElementById("root")!).render(
                 element={
                   <RequireAuth>
                     <Radar />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/memory"
+                element={
+                  <RequireAuth>
+                    <TeamMemory />
                   </RequireAuth>
                 }
               />

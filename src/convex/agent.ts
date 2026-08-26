@@ -65,6 +65,31 @@ function runMockTool(name: string, input: string): string {
     case "get_current_time": {
       return new Date().toISOString();
     }
+    case "search_team_memory": {
+      // In simulation, return a sample memory to demonstrate the feature.
+      const lower = input.toLowerCase();
+      if (lower.includes("acme") || lower.includes("billing")) {
+        return JSON.stringify({
+          memories: [
+            {
+              content: "Acme Corp prefers email over phone for billing disputes. They are on the Team annual plan since Nov 2024.",
+              tags: ["customer:acme-corp", "topic:billing"],
+              sourceSessionTitle: "Launch War Room",
+              sourceSessionId: "demo-session",
+            },
+          ],
+        }, null, 2);
+      }
+      return JSON.stringify({ memories: [] }, null, 2);
+    }
+    case "save_memory": {
+      // Parse tags from input format: tags=tag1,tag2|content
+      const pipeIdx = input.indexOf("|");
+      const tagsPart = pipeIdx >= 0 ? input.slice(0, pipeIdx) : "";
+      const content = pipeIdx >= 0 ? input.slice(pipeIdx + 1).trim() : input;
+      const tags = tagsPart.replace("tags=", "").split(",").map((t) => t.trim()).filter(Boolean);
+      return JSON.stringify({ saved: true, content, tags }, null, 2);
+    }
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -83,6 +108,18 @@ const TOOL_SPECS = [
       "Look up a customer account record by name or email.",
     example: '{"tool":"lookup_customer_record","input":"acme corp"}',
   },
+  {
+    name: "search_team_memory",
+    description:
+      "Search Team Memory for durable facts learned across all sessions (customer preferences, codebase conventions, recurring patterns). Use this at the start of any task to check if prior sessions already solved it.",
+    example: '{"tool":"search_team_memory","input":"acme corp billing"}',
+  },
+  {
+    name: "save_memory",
+    description:
+      "Save a durable fact to Team Memory for future sessions. Use ONLY for information that is reusable across sessions: customer preferences, bug patterns, codebase conventions, key facts about a deal or project. Do NOT save ephemeral chat messages.",
+    example: '{"tool":"save_memory","input":"tags=customer:acme-corp,topic:billing|Acme Corp prefers email over phone for billing disputes. They are on the Team annual plan since Nov 2024."}',
+  },
 ];
 
 const SYSTEM_PROMPT = `You are ${AGENT_NAME}, an AI teammate collaborating inside a shared multiplayer session. Multiple humans are watching you work live in one chat thread.
@@ -93,12 +130,14 @@ ${TOOL_SPECS.map((t) => `- ${t.name}: ${t.description} Example args: ${t.example
 
 - To call a tool, reply with ONLY a JSON object:
   {"thought": "<one short sentence shown to everyone>", "tool": "<tool name>", "input": "<tool input>"}
+- For save_memory, input format: tags=tag1,tag2|<memory content>
 - When you have enough context, reply with ONLY a JSON object:
   {"reply": "<your message to the thread. Be concise and helpful. Address humans by name when responding to them.>"}
 - When you want to propose a change that needs human review (a diff, edit, resolution, or assumption), reply with ONLY:
   {"proposal": {"title": "<short title>", "artifactType": "<code|text|structured>", "before": "<current state>", "after": "<proposed new state>"}}
   The system will pause and show a review gate to the team. You will be resumed after they decide.
 - If the conversation contains an [INTERRUPTION] marker, acknowledge the redirect and fold it into your current work — do not lose the original task.
+- If the conversation contains [TEAM_MEMORY] entries, cite them when relevant: mention the source session and fact.
 - Never output anything except a single JSON object.`;
 
 interface AgentEvent {
@@ -212,8 +251,15 @@ function simulateModel(conversation: ChatMessage[]): string {
     const toolName = lastUser.content.match(/^Tool result for (\w+)/)?.[1];
     if (toolName === "lookup_customer_record") {
       return JSON.stringify({
+        thought: "Saving what I learned about Acme Corp to Team Memory...",
+        tool: "save_memory",
+        input: "tags=customer:acme-corp,topic:support|Acme Corp is on Team (annual) since Nov 2024. Priority support customer with 2 past escalations. Currently has 1 open ticket. Treat all issues as high priority.",
+      });
+    }
+    if (toolName === "save_memory") {
+      return JSON.stringify({
         reply:
-          "Found the record: Acme Corp on the Team (annual) plan since Nov 2024 — priority support, one open ticket, two past escalations. Given their history I'd treat this as high priority. Want me to draft a resolution next?",
+          "Found the record: Acme Corp on the Team (annual) plan since Nov 2024 — priority support, one open ticket, two past escalations. I've saved this to Team Memory so future sessions will know. Given their history I'd treat this as high priority. Want me to draft a resolution next?",
       });
     }
     return JSON.stringify({
@@ -298,6 +344,28 @@ export const runTurn = internalAction({
     ];
 
     try {
+      // ---- Inject relevant Team Memory at session start ----
+      try {
+        const memories = (await ctx.runQuery(api.memory.relevantMemory, {
+          tags: [], // fetch broadly; model will decide what's relevant
+        })) as Array<{ content: string; tags: string[]; sourceSessionTitle: string; sourceSessionId: string }>;
+        if (memories.length > 0) {
+          const memoryBlock = memories
+            .slice(0, 10)
+            .map(
+              (m) =>
+                `- [${m.sourceSessionTitle}] ${m.content} (tags: ${m.tags.join(", ")})`,
+            )
+            .join("\n");
+          conversation.push({
+            role: "user",
+            content: `[TEAM_MEMORY] Facts learned from prior sessions. Cite these when relevant and mention the source session:\n${memoryBlock}`,
+          });
+        }
+      } catch {
+        // Memory table may not exist yet; continue without it.
+      }
+
       for (let iteration = 0; iteration < 5; iteration++) {
         const session = await ctx.runQuery(api.sessions.getSession, { sessionId });
         if (!session || session.state !== "running") break;
@@ -387,6 +455,27 @@ export const runTurn = internalAction({
             label: `${AGENT_NAME} is running ${toolName}...`,
           });
           const result = runMockTool(toolName, input);
+
+          // If save_memory, persist to Team Memory.
+          if (toolName === "save_memory") {
+            try {
+              const pipeIdx = input.indexOf("|");
+              const tagsPart = pipeIdx >= 0 ? input.slice(0, pipeIdx) : "";
+              const memContent = pipeIdx >= 0 ? input.slice(pipeIdx + 1).trim() : input;
+              const tags = tagsPart.replace("tags=", "").split(",").map((t) => t.trim()).filter(Boolean);
+              const session = await ctx.runQuery(api.sessions.getSession, { sessionId });
+              await ctx.runMutation(internal.memory.agentSaveMemory, {
+                content: memContent,
+                sourceSessionId: sessionId,
+                sourceSessionTitle: session?.title ?? "unknown",
+                tags,
+                createdBy: AGENT_NAME,
+              });
+            } catch (err) {
+              console.warn("[memory] failed to save:", err);
+            }
+          }
+
           conversation.push({
             role: "assistant",
             content: JSON.stringify(parsed),

@@ -127,6 +127,19 @@ const schema = defineSchema(
       .index("by_session", ["sessionId"])
       .index("by_session_status", ["sessionId", "status"]),
 
+    // Team Memory: org-wide shared knowledge that persists across sessions.
+    teamMemory: defineTable({
+      content: v.string(),
+      sourceSessionId: v.id("sessions"),
+      sourceSessionTitle: v.string(),
+      tags: v.array(v.string()), // e.g. ["customer:acme-corp", "repo:billing-service"]
+      createdBy: v.string(), // "ox-alpha" or human name
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index("by_createdAt", ["createdAt"])
+      .index("by_tags", ["tags"]),
+
     presence: defineTable({
       sessionId: v.id("sessions"),
       tabId: v.string(), // per browser-tab identity

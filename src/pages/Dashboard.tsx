@@ -11,6 +11,7 @@ import {
   LogOut,
   Plus,
   Users,
+  Brain,
   Hash,
   Radio,
 } from "lucide-react";
@@ -138,6 +139,15 @@ export default function Dashboard() {
           >
             <Radio className="size-3.5" />
             Radar
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate("/memory")}
+            className="nb-border gap-1.5 bg-card px-2.5 text-xs font-bold"
+          >
+            <Brain className="size-3.5" />
+            Memory
           </Button>
           <ThemeToggle />
           <Button
