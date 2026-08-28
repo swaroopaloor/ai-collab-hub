@@ -10,7 +10,6 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 import AppPresenceBar from "./components/AppPresenceBar";
-import GuidedDemo from "./components/GuidedDemo";
 
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import("./pages/Landing.tsx"));
@@ -126,7 +125,6 @@ createRoot(document.getElementById("root")!).render(
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         <BrowserRouter>
           <RouteSyncer />
-          <GuidedDemo />
           <AppPresenceBar />
           <Suspense fallback={<RouteLoading />}>
             <Routes>
