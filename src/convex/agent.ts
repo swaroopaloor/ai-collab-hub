@@ -10,7 +10,7 @@ import { type Id } from "./_generated/dataModel";
 // keys tab:
 //   GROQ_API_KEY  — bearer token from https://console.groq.com/keys
 //
-// Fallback env vars (ox-alpha or any OpenAI-compatible endpoint):
+// Fallback env vars (any OpenAI-compatible endpoint):
 //   OX_ALPHA_API_KEY   — bearer token for the endpoint
 //   OX_ALPHA_BASE_URL  — e.g. https://api.example.com/v1
 //   OX_ALPHA_MODEL     — optional model id override
@@ -22,7 +22,7 @@ import { type Id } from "./_generated/dataModel";
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const GROQ_MODEL = "openai/gpt-oss-120b";
 
-const AGENT_NAME = "ox-alpha";
+const AGENT_NAME = "AI";
 
 type ModelBackend = { baseUrl: string; apiKey: string; model: string };
 
@@ -40,7 +40,7 @@ function resolveModel(): ModelBackend | null {
     return {
       baseUrl: process.env.OX_ALPHA_BASE_URL.replace(/\/+$/, ""),
       apiKey: process.env.OX_ALPHA_API_KEY,
-      model: process.env.OX_ALPHA_MODEL ?? "ox-alpha",
+      model: process.env.OX_ALPHA_MODEL ?? "gpt-4o-mini",
     };
   }
   return null;
@@ -51,7 +51,6 @@ function resolveModel(): ModelBackend | null {
 function runMockTool(name: string, input: string): string {
   switch (name) {
     case "search_knowledge_base": {
-      // In simulation, return sample data
       return JSON.stringify(
         {
           results: [
@@ -85,7 +84,6 @@ function runMockTool(name: string, input: string): string {
       return new Date().toISOString();
     }
     case "search_team_memory": {
-      // In simulation, return a sample memory to demonstrate the feature.
       const lower = input.toLowerCase();
       if (lower.includes("acme") || lower.includes("billing")) {
         return JSON.stringify({
@@ -102,7 +100,6 @@ function runMockTool(name: string, input: string): string {
       return JSON.stringify({ memories: [] }, null, 2);
     }
     case "save_memory": {
-      // Parse tags from input format: tags=tag1,tag2|content
       const pipeIdx = input.indexOf("|");
       const tagsPart = pipeIdx >= 0 ? input.slice(0, pipeIdx) : "";
       const content = pipeIdx >= 0 ? input.slice(pipeIdx + 1).trim() : input;
@@ -141,7 +138,7 @@ const TOOL_SPECS = [
   },
 ];
 
-const SYSTEM_PROMPT = `You are ${AGENT_NAME}, an AI teammate collaborating inside a shared multiplayer session. Multiple humans are watching you work live in one chat thread.
+const SYSTEM_PROMPT = `You are an AI teammate collaborating inside a shared multiplayer session. Multiple humans are watching you work live in one chat thread.
 
 Rules:
 - You may call tools before answering. Available tools:
@@ -180,7 +177,7 @@ function renderThread(events: AgentEvent[]): string {
         case "message":
           return `[${e.seq}] ${e.authorName} (human): ${e.content}`;
         case "agent_message":
-          return `[${e.seq}] You (${AGENT_NAME}): ${e.content}`;
+          return `[${e.seq}] You (AI): ${e.content}`;
         case "agent_tool_call":
           return `[${e.seq}] You used a tool: ${e.content}`;
         case "intervention":
@@ -194,7 +191,7 @@ function renderThread(events: AgentEvent[]): string {
     .join("\n");
 }
 
-// ---- Live model call (ox-alpha, OpenAI-compatible) ------------------------
+// ---- Live model call (Groq or any OpenAI-compatible endpoint) ---------------
 
 async function callLlm(
   messages: ChatMessage[],
@@ -257,7 +254,7 @@ function truncate(text: string, max = 120): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-/** Deterministic stand-in for the model while OX_ALPHA_* env vars are unset
+/** Deterministic stand-in for the model while no API key is set
  *  (or when the live endpoint fails). Emits the same JSON protocol. */
 function simulateModel(conversation: ChatMessage[]): string {
   const lastUser = [...conversation].reverse().find((m) => m.role === "user");
@@ -307,7 +304,7 @@ function simulateModel(conversation: ChatMessage[]): string {
     ? " I saw the interruption mid-turn and folded it in without dropping the original task. "
     : " ";
   return JSON.stringify({
-    reply: `${greeting}.${ack}Here's my take on "${truncate(text)}": break it into a small first step, assign an owner, and iterate. (Running in offline simulation mode until the ox-alpha token is configured.) @mention me again anytime.`,
+    reply: `${greeting}.${ack}Here's my take on "${truncate(text)}": break it into a small first step, assign an owner, and iterate. (Running in offline simulation mode until an AI model API key is configured.) @mention me again anytime.`,
   });
 }
 
@@ -323,7 +320,7 @@ function simulateSummary(sessionTitle: string, events: AgentEvent[]): string {
     .slice(-2)
     .map((e) => `${e.authorName}: "${truncate(e.content, 80)}"`);
   return `Catch-up on "${sessionTitle}": ${humans.length > 0 ? humans.join(", ") : "the team"} discussed ${events.filter((e) => e.type === "message").length} message(s)${
-    events.some((e) => e.type === "agent_tool_call") ? ", and ox-alpha ran some tool lookups" : ""
+    events.some((e) => e.type === "agent_tool_call") ? ", and the AI agent ran some tool lookups" : ""
   }. Latest: ${lastMessages.join(" · ") || "nothing yet"}.`;
 }
 
@@ -409,13 +406,11 @@ export const runTurn = internalAction({
           // Check autonomous scope: if set and no humans present, continue working.
           const autonomousScope = session.autonomousScope;
           if (autonomousScope && autonomousScope !== "off") {
-            // Autonomous mode: keep working even without human prompts.
             conversation.push({
               role: "user",
               content: `[AUTONOMOUS MODE — scope: ${autonomousScope}] No humans are currently present. Continue working on the session's goals autonomously. Make progress, save findings to Team Memory, and propose changes via gates. Do NOT send chat messages — only use tools and proposals.`,
             });
           } else {
-            // Nothing left to respond to.
             break;
           }
         }
@@ -423,7 +418,7 @@ export const runTurn = internalAction({
         // Attribution: who prompted this turn (last human to @mention).
         const mentionMsg = [...events]
           .reverse()
-          .find((e) => e.type === "message" && /@(claude|agent|ox[- ]?alpha)\b/i.test(e.content));
+          .find((e) => e.type === "message" && /@(claude|agent|ai)\b/i.test(e.content));
         const attribution = mentionMsg?.authorName ?? pendingHuman[0]?.authorName ?? "the team";
 
         const interruptionNote =
@@ -540,7 +535,6 @@ export const runTurn = internalAction({
           const artifactType = String(proposal.artifactType ?? "text");
           const thoughtMsg = String(parsed.thought ?? `Proposing: ${proposal.title}`);
 
-          // Post the thought as an agent message first.
           await ctx.runMutation(internal.sessions.internalAppendEvent, {
             sessionId,
             type: "agent_message",
@@ -550,7 +544,6 @@ export const runTurn = internalAction({
             promptedBy: attribution,
           });
 
-          // Post a proposal event and create the gate (both pause the session).
           await ctx.runMutation(
             internal.sessions.internalAppendEvent,
             {
@@ -563,7 +556,6 @@ export const runTurn = internalAction({
             },
           );
 
-          // Fetch the event we just created to get its ID for the gate.
           const proposalEvents = (await ctx.runQuery(api.events.listEvents, {
             sessionId,
           })) as Array<{ _id: string; type: string; authorName: string }>;
@@ -581,7 +573,6 @@ export const runTurn = internalAction({
             createdBy: AGENT_NAME,
           });
 
-          // Session is now paused; the turn loop will exit.
           return;
         }
 
@@ -662,7 +653,6 @@ export const generateJoinSummary = internalAction({
     const session = await ctx.runQuery(api.sessions.getSession, { sessionId });
     if (!session) return;
 
-    // Don't stack duplicate summaries back-to-back.
     const last = events[events.length - 1];
     if (last?.type === "summary") return;
 

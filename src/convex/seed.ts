@@ -4,7 +4,7 @@ import { mutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { makeJoinCode } from "./sessions";
 
-const AGENT_NAME = "ox-alpha";
+const AGENT_NAME = "AI";
 
 /** Seed demo data if the user has no sessions yet. Idempotent. */
 export const seedDemoData = mutation({
@@ -74,13 +74,13 @@ export const seedDemoData = mutation({
 
     const s1Events = [
       { type: "system" as const, authorType: "system" as const, authorName: "System", content: `${name} created the session.` },
-      { type: "message" as const, authorType: "human" as const, authorName: name, content: "@ox-alpha can you look into the Acme Corp refund request? They're on the Team annual plan." },
+      { type: "message" as const, authorType: "human" as const, authorName: name, content: "@AI can you look into the Acme Corp refund request? They're on the Team annual plan." },
       { type: "agent_tool_call" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "Looking up Acme Corp customer record → lookup_customer_record(\"acme corp\")", toolName: "lookup_customer_record", promptedBy: name },
       { type: "agent_message" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "Found Acme Corp — Team (annual) plan since Nov 2024, priority support, 2 past escalations. I'll search our refund policy.", promptedBy: name },
       { type: "agent_tool_call" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "Searching KB for refund policy → search_knowledge_base(\"refund policy\")", toolName: "search_knowledge_base", promptedBy: name },
       { type: "agent_message" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "Our policy allows full refunds within 30 days for Team plans. Acme is well within that window. I recommend approving the refund and sending a retention offer.", promptedBy: name },
       { type: "intervention" as const, authorType: "human" as const, authorName: "Sarah Chen", content: "handed off to Sarah Chen: \"Taking over from PST timezone — will follow up with Acme\"" },
-      { type: "message" as const, authorType: "human" as const, authorName: "Sarah Chen", content: "Good analysis. @ox-alpha can you also draft a retention email offering them a discount to stay?" },
+      { type: "message" as const, authorType: "human" as const, authorName: "Sarah Chen", content: "Good analysis. @AI can you also draft a retention email offering them a discount to stay?" },
       { type: "agent_message" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "Drafting a retention email with a 20% discount offer for their next renewal cycle. I'll save this customer context to Team Memory for future sessions.", promptedBy: "Sarah Chen" },
       { type: "system" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "saved to Team Memory: \"Acme Corp is on Team (annual) since Nov 2024. Priority support customer with 2 past escalations.\" [customer:acme-corp, topic:support]" },
     ];
@@ -116,7 +116,7 @@ export const seedDemoData = mutation({
 
     const s2Events = [
       { type: "system" as const, authorType: "system" as const, authorName: "System", content: `${name} created the session.` },
-      { type: "message" as const, authorType: "human" as const, authorName: name, content: "@ox-alpha the billing API is hitting rate limits for enterprise clients. Can you propose a fix?" },
+      { type: "message" as const, authorType: "human" as const, authorName: name, content: "@AI the billing API is hitting rate limits for enterprise clients. Can you propose a fix?" },
       { type: "agent_tool_call" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "Searching KB for rate limit docs → search_knowledge_base(\"billing API rate limit\")", toolName: "search_knowledge_base", promptedBy: name },
       { type: "agent_message" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "Found it — the current limit is 100 req/min per org. Enterprise SLA requires 500. I'll propose increasing the limit and adding a tier-based config.", promptedBy: name },
       { type: "proposal" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "proposed: \"increase rate limit\" — awaiting review", promptedBy: name },
@@ -162,7 +162,7 @@ export const seedDemoData = mutation({
 
     const s3_parentEvents = [
       { type: "system" as const, authorType: "system" as const, authorName: "System", content: `${name} created the session.` },
-      { type: "message" as const, authorType: "human" as const, authorName: name, content: "@ox-alpha let's brainstorm Q3 priorities. What worked in Q2?" },
+      { type: "message" as const, authorType: "human" as const, authorName: name, content: "@AI let's brainstorm Q3 priorities. What worked in Q2?" },
       { type: "agent_message" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "In Q2, the team shipped 3 major features. The highest-impact was the real-time collaboration engine. I'd suggest doubling down on multiplayer experiences.", promptedBy: name },
       { type: "message" as const, authorType: "human" as const, authorName: name, content: "Agreed. What about expanding to support war rooms?" },
       { type: "agent_message" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "Support war rooms are a great fit — the same session abstraction works. I'd prototype it with a ticket resolution artifact.", promptedBy: name },
@@ -244,8 +244,8 @@ export const seedDemoData = mutation({
 
     const s4Events = [
       { type: "system" as const, authorType: "system" as const, authorName: "System", content: `${name} created the session.` },
-      { type: "summary" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "Catch-up on \"Acme Corp Onboarding Review\": ox-alpha recalled from Team Memory that Acme Corp is on Team (annual) since Nov 2024, priority support customer. Preparing their onboarding checklist based on past interactions." },
-      { type: "message" as const, authorType: "human" as const, authorName: name, content: "@ox-alpha what do we already know about Acme Corp?" },
+      { type: "summary" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "Catch-up on \"Acme Corp Onboarding Review\": your AI agent recalled from Team Memory that Acme Corp is on Team (annual) since Nov 2024, priority support customer. Preparing their onboarding checklist based on past interactions." },
+      { type: "message" as const, authorType: "human" as const, authorName: name, content: "@AI what do we already know about Acme Corp?" },
       { type: "agent_message" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "From Team Memory (sourced from Session \"Acme Corp Refund Escalation\"): Acme Corp is on the Team annual plan since Nov 2024. They're a priority support customer with 2 past escalations. They had a refund request recently that we handled with a retention offer. I'll use this context to prepare their onboarding checklist.", promptedBy: name },
     ];
     for (let i = 0; i < s4Events.length; i++) {
@@ -270,7 +270,7 @@ export const seedDemoData = mutation({
 
     const s5Events = [
       { type: "system" as const, authorType: "system" as const, authorName: "System", content: `${name} created the session.` },
-      { type: "message" as const, authorType: "human" as const, authorName: name, content: "@ox-alpha draft a feature spec for notification preferences" },
+      { type: "message" as const, authorType: "human" as const, authorName: name, content: "@AI draft a feature spec for notification preferences" },
       { type: "agent_message" as const, authorType: "agent" as const, authorName: AGENT_NAME, content: "Here's a draft spec: Users should be able to configure per-channel notification preferences (email, in-app, push). Settings should be accessible from the profile page with sensible defaults. Want me to expand any section?", promptedBy: name },
     ];
     for (let i = 0; i < s5Events.length; i++) {

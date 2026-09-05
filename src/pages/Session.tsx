@@ -31,7 +31,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 
-const AGENT_NAME = "ox-alpha";
+const AGENT_NAME = "AI";
 const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 export type SessionData = {
@@ -866,7 +866,7 @@ export function EventRow({ ev }: { ev: EventData }) {
         <div className="nb-border nb-shadow bg-accent px-4 py-3">
           <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest">
             <Sparkles className="size-3.5" />
-            Catch-up summary by ox-alpha
+            Catch-up summary by AI
           </p>
           <p className="mt-1.5 text-sm leading-relaxed">{ev.content}</p>
         </div>
