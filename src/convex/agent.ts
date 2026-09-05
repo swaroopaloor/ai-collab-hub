@@ -154,6 +154,7 @@ ${TOOL_SPECS.map((t) => `- ${t.name}: ${t.description} Example args: ${t.example
   The system will pause and show a review gate to the team. You will be resumed after they decide.
 - If the conversation contains an [INTERRUPTION] marker, acknowledge the redirect and fold it into your current work — do not lose the original task.
 - If the conversation contains [TEAM_MEMORY] entries, cite them when relevant: mention the source session and fact.
+- Inside the "reply" value, write plain conversational text for humans. Never put JSON, code fences, or protocol syntax inside the reply value itself.
 - Never output anything except a single JSON object.`;
 
 interface AgentEvent {
@@ -195,14 +196,16 @@ function renderThread(events: AgentEvent[]): string {
 
 async function callLlm(
   messages: ChatMessage[],
+  opts: { jsonMode?: boolean } = {},
 ): Promise<{ ok: boolean; text: string }> {
   const backend = resolveModel();
   if (!backend) {
     return { ok: false, text: "No AI model configured." };
   }
   const label = backend.baseUrl.includes("groq") ? "groq" : "llm";
-  try {
-    const res = await fetch(`${backend.baseUrl}/chat/completions`, {
+
+  const attempt = (withJsonMode: boolean) =>
+    fetch(`${backend.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -213,8 +216,18 @@ async function callLlm(
         messages,
         temperature: 0.4,
         max_tokens: 700,
+        // Force strict JSON so the model never drifts into prose or leaks
+        // partial JSON into the thread.
+        ...(withJsonMode ? { response_format: { type: "json_object" } } : {}),
       }),
     });
+
+  try {
+    let res = await attempt(!!opts.jsonMode);
+    // Some endpoints/models reject response_format — retry once without it.
+    if (!res.ok && res.status === 400 && opts.jsonMode) {
+      res = await attempt(false);
+    }
     if (!res.ok) {
       console.warn(`[${label}] HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
       return { ok: false, text: `${label} HTTP ${res.status}` };
@@ -329,11 +342,40 @@ async function askModel(
 ): Promise<{ ok: boolean; text: string }> {
   const backend = resolveModel();
   if (backend) {
-    const live = await callLlm(conversation);
+    const live = await callLlm(conversation, { jsonMode: true });
     if (live.ok) return live;
     console.warn("[agent] falling back to offline simulation:", live.text);
   }
   return { ok: true, text: simulateModel(conversation) };
+}
+
+/**
+ * Recover the human-readable reply from a model response that did not parse as
+ * our JSON protocol. Strips code fences, pulls text out of wrapper objects,
+ * and falls back to the raw text only if nothing structured survives.
+ */
+function salvageReply(text: string): string | null {
+  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (typeof parsed === "string") return parsed;
+    if (parsed && typeof parsed === "object") {
+      const obj = parsed as Record<string, unknown>;
+      for (const key of ["reply", "message", "content", "text", "response", "answer"]) {
+        const v = obj[key];
+        if (typeof v === "string" && v.trim()) return v.trim();
+      }
+      // Last resort: stringify the object pretty-printed (better than raw).
+      return JSON.stringify(obj, null, 2);
+    }
+  } catch {
+    // Not JSON — treat as plain prose below.
+  }
+
+  // Prose is fine as-is: it looks like a normal chat message.
+  return trimmed;
 }
 
 function parseModelJson(text: string): Record<string, unknown> | null {
@@ -451,13 +493,15 @@ export const runTurn = internalAction({
 
         const parsed = parseModelJson(text);
         if (!parsed) {
-          // Model didn't follow format; post raw text as its message.
+          // Model didn't follow the JSON protocol — salvage a human-readable
+          // reply instead of dumping raw JSON into the chat thread.
+          const salvaged = salvageReply(text) ?? "Sorry — I hit a snag formatting my response. @mention me again and I'll try again.";
           await ctx.runMutation(internal.sessions.internalAppendEvent, {
             sessionId,
             type: "agent_message",
             authorType: "agent",
             authorName: AGENT_NAME,
-            content: text.slice(0, 2000),
+            content: salvaged.slice(0, 2000),
             promptedBy: attribution,
           });
           break;
@@ -465,7 +509,15 @@ export const runTurn = internalAction({
 
         if (typeof parsed.tool === "string") {
           const toolName = parsed.tool;
-          const input = String(parsed.input ?? "");
+          // Inputs may arrive as non-strings (numbers, nested objects) —
+          // stringify them readably instead of "[object Object]".
+          const rawInput = parsed.input;
+          const input =
+            typeof rawInput === "string"
+              ? rawInput
+              : rawInput === undefined || rawInput === null
+                ? ""
+                : JSON.stringify(rawInput);
           await ctx.runMutation(internal.sessions.internalAppendEvent, {
             sessionId,
             type: "agent_tool_call",
@@ -577,12 +629,26 @@ export const runTurn = internalAction({
         }
 
         // Final reply.
-        const reply =
-          typeof parsed.reply === "string"
-            ? parsed.reply
-            : typeof parsed.content === "string"
-              ? parsed.content
-              : text;
+        const replyValue = typeof parsed.reply === "string" && parsed.reply.trim()
+          ? parsed.reply
+          : typeof parsed.content === "string" && parsed.content.trim()
+            ? parsed.content
+            : null;
+        // Handle nested objects like {"reply": {"text": "..."}} gracefully.
+        let reply: string;
+        if (replyValue) {
+          reply = replyValue;
+        } else if (parsed.reply && typeof parsed.reply === "object") {
+          const nested = parsed.reply as Record<string, unknown>;
+          reply =
+            (typeof nested.text === "string" && nested.text) ||
+            (typeof nested.content === "string" && nested.content) ||
+            (typeof nested.message === "string" && nested.message) ||
+            salvageReply(JSON.stringify(nested)) ||
+            "Sorry — I hit a snag formatting my response. @mention me again and I'll try again.";
+        } else {
+          reply = salvageReply(text) ?? "Sorry — I hit a snag formatting my response. @mention me again and I'll try again.";
+        }
         conversation.push({ role: "assistant", content: JSON.stringify(parsed) });
 
         await ctx.runMutation(internal.sessions.internalAppendEvent, {

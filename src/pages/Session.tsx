@@ -35,95 +35,147 @@ const AGENT_NAME = "AI";
 const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 // ---------- Smooth scrubber ----------
+// The thumb/fill are painted via refs (no React re-render per pointer move) and
+// the timeline preview updates live DURING the drag, throttled with RAF.
 function TimeScrubber({
   value,
   max,
+  onPreview,
   onCommit,
 }: {
   value: number;
   max: number;
+  onPreview: (v: number) => void;
   onCommit: (v: number) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
-  const liveValue = useRef(value);
+  const activePointer = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const pendingValue = useRef<number | null>(null);
+  const lastPreviewed = useRef(value);
   const thumbRef = useRef<HTMLDivElement>(null);
   const fillRef = useRef<HTMLDivElement>(null);
-  const posLabelRef = useRef<HTMLSpanElement>(null);
-
-  // Sync the visual to the React value when not dragging.
-  useEffect(() => {
-    if (dragging.current) return;
-    liveValue.current = value;
-    paint(value);
-  }, [value]);
 
   const paint = useCallback((v: number) => {
     const pct = max > 0 ? (v / max) * 100 : 0;
     if (fillRef.current) fillRef.current.style.width = `${pct}%`;
     if (thumbRef.current) thumbRef.current.style.left = `${pct}%`;
-    if (posLabelRef.current) posLabelRef.current.textContent = `${v + 1}/${max + 1}`;
   }, [max]);
+
+  // Sync the visual to the React value when not dragging.
+  useEffect(() => {
+    if (dragging.current) return;
+    paint(value);
+  }, [value, paint]);
 
   const valueFromPointer = useCallback((clientX: number) => {
     const rect = trackRef.current?.getBoundingClientRect();
-    if (!rect) return 0;
+    if (!rect || rect.width === 0) return 0;
     const pct = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
     return Math.round(pct * max);
   }, [max]);
 
-  const onPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    if (max === 0) return;
+  const flush = useCallback(() => {
+    rafRef.current = null;
+    if (pendingValue.current === null) return;
+    const v = pendingValue.current;
+    pendingValue.current = null;
+    lastPreviewed.current = v;
+    paint(v);
+    onPreview(v);
+  }, [paint, onPreview]);
+
+  const schedule = useCallback((v: number) => {
+    pendingValue.current = v;
+    if (rafRef.current === null) {
+      rafRef.current = requestAnimationFrame(flush);
+    }
+  }, [flush]);
+
+  const startDrag = useCallback((clientX: number, pointerId: number) => {
     dragging.current = true;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    const v = valueFromPointer(e.clientX);
-    liveValue.current = v;
-    paint(v);
-  }, [max, valueFromPointer, paint]);
+    activePointer.current = pointerId;
+    schedule(valueFromPointer(clientX));
+  }, [schedule, valueFromPointer]);
 
-  const onPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!dragging.current) return;
-    const v = valueFromPointer(e.clientX);
-    liveValue.current = v;
-    paint(v);
-  }, [valueFromPointer, paint]);
-
-  const onPointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+  const endDrag = useCallback((commit: boolean, clientX: number | null) => {
     if (!dragging.current) return;
     dragging.current = false;
-    const v = valueFromPointer(e.clientX);
-    onCommit(v);
-  }, [valueFromPointer, onCommit]);
+    activePointer.current = null;
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      // Paint any pending value we were about to show.
+      if (pendingValue.current !== null) paint(pendingValue.current);
+      pendingValue.current = null;
+    }
+    if (commit) {
+      // If the browser never sent us a final position (touch/edge cases),
+      // commit the last previewed value instead.
+      const v = clientX !== null ? valueFromPointer(clientX) : lastPreviewed.current;
+      onCommit(v);
+    }
+  }, [valueFromPointer, onCommit, paint]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
 
   const pct = max > 0 ? (value / max) * 100 : 0;
 
   return (
     <div
-      ref={trackRef}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      className="time-scrubber-track relative h-2 w-full touch-none select-none bg-secondary"
-      role="slider"
-      aria-label="Scrub session timeline"
-      aria-valuemin={0}
-      aria-valuemax={max}
-      aria-valuenow={value}
+      className="relative min-w-0 flex-1 py-2.5"
+      onPointerDown={(e) => {
+        if (max === 0) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        startDrag(e.clientX, e.pointerId);
+      }}
+      onPointerMove={(e) => {
+        if (!dragging.current || activePointer.current !== e.pointerId) return;
+        schedule(valueFromPointer(e.clientX));
+      }}
+      onPointerUp={(e) => {
+        if (activePointer.current !== e.pointerId) return;
+        endDrag(true, e.clientX);
+      }}
+      onPointerCancel={(e) => {
+        if (activePointer.current !== e.pointerId) return;
+        // A cancelled pointer (e.g. browser gesture takes over) must NOT seek.
+        endDrag(false, null);
+      }}
+      onLostPointerCapture={(e) => {
+        if (dragging.current && activePointer.current === e.pointerId) {
+          endDrag(false, null);
+        }
+      }}
     >
       <div
-        ref={fillRef}
-        className="absolute inset-y-0 left-0 bg-[#4DA6FF]"
-        style={{ width: `${pct}%` }}
-      />
-      <div
-        ref={thumbRef}
-        className="time-scrubber-thumb absolute top-1/2 -translate-y-1/2 -translate-x-1/2"
-        style={{ left: `${pct}%` }}
-      />
-      <span ref={posLabelRef} className="sr-only">
-        Position {value + 1} of {max + 1}
-      </span>
+        ref={trackRef}
+        className="time-scrubber-track relative h-2 w-full touch-none select-none bg-secondary"
+        role="slider"
+        aria-label="Scrub session timeline"
+        aria-valuemin={0}
+        aria-valuemax={max}
+        aria-valuenow={value}
+      >
+        <div
+          ref={fillRef}
+          className="absolute inset-y-0 left-0 bg-[#4DA6FF]"
+          style={{ width: `${pct}%` }}
+        />
+        <div
+          ref={thumbRef}
+          className="time-scrubber-thumb absolute top-1/2 -translate-y-1/2 -translate-x-1/2"
+          style={{ left: `${pct}%` }}
+        />
+        <span className="sr-only">
+          Position {value + 1} of {max + 1}
+        </span>
+      </div>
     </div>
   );
 }
@@ -372,8 +424,13 @@ export default function Session() {
     }, 320);
     return () => clearInterval(t);
   }, [replaying, maxIndex]);
+  // Reaching the newest event means we're live again — snap out of time travel
+  // so the composer re-enables and no stale historical state lingers.
   useEffect(() => {
-    if (viewIndex !== null && viewIndex >= maxIndex) setReplaying(false);
+    if (viewIndex !== null && viewIndex >= maxIndex) {
+      setReplaying(false);
+      setViewIndex(null);
+    }
   }, [viewIndex, maxIndex]);
 
   const seek = useCallback((i: number) => {
@@ -563,52 +620,55 @@ export default function Session() {
         >
           {replaying ? <Square className="size-3" /> : <Play className="size-3.5" />}
         </button>
-        <TimeScrubber value={effectiveIndex} max={maxIndex} onCommit={seek} />
-        <span className="hidden shrink-0 text-[10px] font-black uppercase tracking-widest sm:inline">
-          {timeTraveling ? (
-            <>
-              POS {effectiveIndex + 1}/{maxIndex + 1}
-            </>
-          ) : (
-            <>LIVE · {maxIndex + 1} events</>
-          )}
+        <TimeScrubber
+          value={effectiveIndex}
+          max={maxIndex}
+          onPreview={seek}
+          onCommit={seek}
+        />
+        <span className="hidden w-28 shrink-0 text-right text-[10px] font-black uppercase tracking-widest tabular-nums sm:inline">
+          {timeTraveling
+            ? `POS ${effectiveIndex + 1}/${maxIndex + 1}`
+            : `LIVE · ${maxIndex + 1} events`}
         </span>
-        {timeTraveling ? (
-          <>
-            <Button
-              size="sm"
-              onClick={() => void handleFork()}
-              disabled={forking}
-              className="nb-border nb-lift h-7 shrink-0 bg-[#B57BFF] px-2 text-[10px] font-black text-black sm:px-3 sm:text-xs"
-            >
-              <GitFork className="size-3.5" />
-              <span className="hidden sm:inline">Fork</span>
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                setReplaying(false);
-                setViewIndex(null);
-              }}
-              className="nb-border nb-lift h-7 shrink-0 bg-[#4DA6FF] px-2 text-[10px] font-black text-black sm:px-3 sm:text-xs"
-            >
-              <Radio className="size-3.5" />
-              <span className="hidden sm:inline">Live</span>
-            </Button>
-          </>
-        ) : (
+        {/* Controls are always rendered in the same order/size so entering or
+            leaving time travel never shifts the layout mid-drag. */}
+        <div className="flex shrink-0 items-center gap-1">
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setViewIndex(maxIndex - 1)}
+            onClick={() => setViewIndex(Math.max(maxIndex - 1, 0))}
             disabled={maxIndex === 0}
             title="Step back one event"
-            className="nb-border nb-lift h-7 shrink-0 bg-card px-2 text-[10px] font-bold sm:px-3 sm:text-xs"
+            className="nb-border nb-lift h-7 w-7 shrink-0 bg-card px-0 text-[10px] font-bold sm:w-auto sm:px-3 sm:text-xs"
           >
             <History className="size-3.5" />
-            <span className="hidden sm:inline">Rewind</span>
+            <span className="hidden lg:inline">Rewind</span>
           </Button>
-        )}
+          <Button
+            size="sm"
+            onClick={() => {
+              setReplaying(false);
+              setViewIndex(null);
+            }}
+            disabled={!timeTraveling}
+            title="Return to live"
+            className="nb-border nb-lift h-7 w-7 shrink-0 bg-[#4DA6FF] px-0 text-[10px] font-black text-black disabled:opacity-40 sm:w-auto sm:px-3 sm:text-xs"
+          >
+            <Radio className="size-3.5" />
+            <span className="hidden lg:inline">Live</span>
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => void handleFork()}
+            disabled={!timeTraveling || forking}
+            title="Fork from this point in time"
+            className="nb-border nb-lift h-7 w-7 shrink-0 bg-[#B57BFF] px-0 text-[10px] font-black text-black disabled:opacity-40 sm:w-auto sm:px-3 sm:text-xs"
+          >
+            <GitFork className="size-3.5" />
+            <span className="hidden lg:inline">Fork</span>
+          </Button>
+        </div>
       </div>
 
       {/* State legend strip */}
