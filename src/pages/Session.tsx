@@ -627,7 +627,7 @@ export default function Session() {
                   <p className="font-bold">Kick things off</p>
                   <p className="mt-1 text-sm text-muted-foreground">
                     Post a message and include{" "}
-                    <code className="bg-secondary px-1 font-bold">@ox-alpha</code>{" "}
+                    <code className="bg-secondary px-1 font-bold">@agent</code>{" "}
                     to bring the agent into the conversation.
                   </p>
                 </div>
@@ -669,10 +669,9 @@ export default function Session() {
                     : myRole === "observer"
                       ? "Read-only — request control below to post"
                       : timeTraveling
-                        ? "Time traveling — jump back to LIVE to post"
-                        : displayState === "done"
+                        ? "Time traveling — jump back to LIVE to post"                          : displayState === "done"
                           ? "This session is done"
-                          : "Message everyone. Use @ox-alpha to prompt the agent."
+                          : "Message everyone. Use @agent to prompt the AI."
                 }
                 className="nb-border h-10 flex-1 bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus:shadow-[2px_2px_0_0_#111] dark:focus:shadow-[2px_2px_0_0_#f5f5f0]"
               />

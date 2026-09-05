@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   ArrowRight,
+  BookOpen,
   Check,
   Copy,
   LogOut,
@@ -158,6 +159,15 @@ export default function Dashboard() {
           >
             <Brain className="size-3.5" />
             Memory
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate("/knowledge-base")}
+            className="nb-border gap-1.5 bg-card px-2.5 text-xs font-bold"
+          >
+            <BookOpen className="size-3.5" />
+            Knowledge Base
           </Button>
           <ThemeToggle />
           <Button

@@ -131,6 +131,18 @@ const schema = defineSchema(
       .index("by_session", ["sessionId"])
       .index("by_session_status", ["sessionId", "status"]),
 
+    // Knowledge Base: admin-managed documents the agent can search.
+    knowledgeBases: defineTable({
+      title: v.string(),
+      content: v.string(), // full text content of the article
+      tags: v.array(v.string()), // e.g. ["billing", "onboarding"]
+      createdBy: v.id("users"),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index("by_createdAt", ["createdAt"])
+      .index("by_tags", ["tags"]),
+
     // Team Memory: org-wide shared knowledge that persists across sessions.
     teamMemory: defineTable({
       content: v.string(),

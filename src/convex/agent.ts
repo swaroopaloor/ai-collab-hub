@@ -6,21 +6,44 @@ import { api, internal } from "./_generated/api";
 import { type Id } from "./_generated/dataModel";
 
 // ---- Model configuration -------------------------------------------------
-// ox-alpha via any OpenAI-compatible endpoint. Set these env vars once you
-// have the token (Keys / API keys tab):
-//   OX_ALPHA_API_KEY   — bearer token for the endpoint
-//   OX_ALPHA_BASE_URL  — e.g. https://api.example.com/v1  (must expose /chat/completions)
-//   OX_ALPHA_MODEL     — optional model id override (defaults to "ox-alpha")
+// Groq free tier (OpenAI-compatible). Set these env vars in the Keys / API
+// keys tab:
+//   GROQ_API_KEY  — bearer token from https://console.groq.com/keys
 //
-// Until the key is set (or if the endpoint fails), the agent runs in offline
+// Fallback env vars (ox-alpha or any OpenAI-compatible endpoint):
+//   OX_ALPHA_API_KEY   — bearer token for the endpoint
+//   OX_ALPHA_BASE_URL  — e.g. https://api.example.com/v1
+//   OX_ALPHA_MODEL     — optional model id override
+//
+// Until a key is set (or if the endpoint fails), the agent runs in offline
 // simulation mode: deterministic responses that still exercise the full tool
-// loop, interruption handling, attribution and summaries so Phases 1-2 work
-// end-to-end right now.
-const AGENT_MODEL = process.env.OX_ALPHA_MODEL ?? "ox-alpha";
+// loop, interruption handling, attribution and summaries.
+
+const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
+
 const AGENT_NAME = "ox-alpha";
 
-function isModelConfigured(): boolean {
-  return Boolean(process.env.OX_ALPHA_API_KEY && process.env.OX_ALPHA_BASE_URL);
+type ModelBackend = { baseUrl: string; apiKey: string; model: string };
+
+function resolveModel(): ModelBackend | null {
+  // Prefer Groq (free tier, ultra-fast)
+  if (process.env.GROQ_API_KEY) {
+    return {
+      baseUrl: GROQ_BASE_URL,
+      apiKey: process.env.GROQ_API_KEY,
+      model: process.env.OX_ALPHA_MODEL ?? GROQ_MODEL,
+    };
+  }
+  // Fallback: any OpenAI-compatible endpoint
+  if (process.env.OX_ALPHA_API_KEY && process.env.OX_ALPHA_BASE_URL) {
+    return {
+      baseUrl: process.env.OX_ALPHA_BASE_URL.replace(/\/+$/, ""),
+      apiKey: process.env.OX_ALPHA_API_KEY,
+      model: process.env.OX_ALPHA_MODEL ?? "ox-alpha",
+    };
+  }
+  return null;
 }
 
 // ---- Mock tools (stubs returning fake data) -------------------------------
@@ -28,17 +51,13 @@ function isModelConfigured(): boolean {
 function runMockTool(name: string, input: string): string {
   switch (name) {
     case "search_knowledge_base": {
+      // In simulation, return sample data
       return JSON.stringify(
         {
           results: [
             {
               title: `KB: Getting started with "${input}"`,
               excerpt: `Our docs recommend starting small. Teams that adopted ${input} saw onboarding time drop by ~40%. Key steps: 1) define scope, 2) assign a driver, 3) review weekly.`,
-            },
-            {
-              title: "KB: Troubleshooting common issues",
-              excerpt:
-                "If the issue persists after a restart, collect diagnostics from Settings → Diagnostics and attach them to your ticket.",
             },
           ],
         },
@@ -177,45 +196,45 @@ function renderThread(events: AgentEvent[]): string {
 
 // ---- Live model call (ox-alpha, OpenAI-compatible) ------------------------
 
-async function callOxAlpha(
+async function callLlm(
   messages: ChatMessage[],
 ): Promise<{ ok: boolean; text: string }> {
-  const apiKey = process.env.OX_ALPHA_API_KEY;
-  const baseUrl = (process.env.OX_ALPHA_BASE_URL ?? "").replace(/\/+$/, "");
-  if (!apiKey || !baseUrl) {
-    return { ok: false, text: "ox-alpha not configured." };
+  const backend = resolveModel();
+  if (!backend) {
+    return { ok: false, text: "No AI model configured." };
   }
+  const label = backend.baseUrl.includes("groq") ? "groq" : "llm";
   try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
+    const res = await fetch(`${backend.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`,
+        authorization: `Bearer ${backend.apiKey}`,
       },
       body: JSON.stringify({
-        model: AGENT_MODEL,
+        model: backend.model,
         messages,
         temperature: 0.4,
         max_tokens: 700,
       }),
     });
     if (!res.ok) {
-      console.warn(`[ox-alpha] HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-      return { ok: false, text: `ox-alpha HTTP ${res.status}` };
+      console.warn(`[${label}] HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      return { ok: false, text: `${label} HTTP ${res.status}` };
     }
     const data = (await res.json()) as {
       choices?: Array<{ message?: { content?: unknown } }>;
     };
     const content = data.choices?.[0]?.message?.content;
     if (!content) {
-      return { ok: false, text: "ox-alpha returned no content." };
+      return { ok: false, text: `${label} returned no content.` };
     }
     return {
       ok: true,
       text: typeof content === "string" ? content : JSON.stringify(content),
     };
   } catch (err) {
-    console.warn("[ox-alpha] request failed:", err);
+    console.warn(`[${label}] request failed:`, err);
     return {
       ok: false,
       text: err instanceof Error ? err.message : String(err),
@@ -311,10 +330,11 @@ function simulateSummary(sessionTitle: string, events: AgentEvent[]): string {
 async function askModel(
   conversation: ChatMessage[],
 ): Promise<{ ok: boolean; text: string }> {
-  if (isModelConfigured()) {
-    const live = await callOxAlpha(conversation);
+  const backend = resolveModel();
+  if (backend) {
+    const live = await callLlm(conversation);
     if (live.ok) return live;
-    console.warn("[ox-alpha] falling back to offline simulation:", live.text);
+    console.warn("[agent] falling back to offline simulation:", live.text);
   }
   return { ok: true, text: simulateModel(conversation) };
 }
@@ -464,7 +484,22 @@ export const runTurn = internalAction({
             sessionId,
             label: `${AGENT_NAME} is running ${toolName}...`,
           });
-          const result = runMockTool(toolName, input);
+          let result: string;
+          if (toolName === "search_knowledge_base") {
+            // Query real knowledge base data
+            try {
+              const kbResults = (await ctx.runQuery(
+                api.knowledgeBases.internalSearchKnowledgeBases,
+                { query: input },
+              )) as Array<{ title: string; excerpt: string; tags: string[] }>;
+              result = JSON.stringify({ results: kbResults }, null, 2);
+            } catch {
+              // KB table may not exist yet; fall back to mock
+              result = runMockTool(toolName, input);
+            }
+          } else {
+            result = runMockTool(toolName, input);
+          }
 
           // If save_memory, persist to Team Memory.
           if (toolName === "save_memory") {
@@ -632,8 +667,8 @@ export const generateJoinSummary = internalAction({
     if (last?.type === "summary") return;
 
     let summary: string | null = null;
-    if (isModelConfigured()) {
-      const live = await callOxAlpha([
+    if (resolveModel()) {
+      const live = await callLlm([
         {
           role: "system",
           content:
