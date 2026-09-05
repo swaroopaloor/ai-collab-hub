@@ -126,27 +126,27 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen">
       {/* Top bar */}
-      <header className="nb-border sticky top-0 z-20 flex h-14 items-center justify-between border-x-0 border-t-0 bg-card px-4 sm:px-6">
+      <header className="nb-border sticky top-0 z-20 flex h-12 items-center justify-between border-x-0 border-t-0 bg-card px-3 sm:h-14 sm:px-6">
         <button
           onClick={() => navigate("/dashboard")}
-          className="flex items-center gap-2"
+          className="flex shrink-0 items-center gap-2"
         >
           <span className="nb-border nb-shadow-sm flex size-7 items-center justify-center bg-primary text-xs font-black">
             M/
           </span>
-          <span className="text-sm font-black tracking-tight uppercase">
+          <span className="hidden text-sm font-black tracking-tight uppercase sm:inline">
             Multiplayer
           </span>
         </button>
-        <div className="flex items-center gap-3">
-          <span className="hidden text-xs font-medium text-muted-foreground sm:block">
+        <div className="flex min-w-0 items-center gap-1 sm:gap-3">
+          <span className="hidden text-xs font-medium text-muted-foreground lg:block">
             {user?.name ?? user?.email ?? "Guest"}
           </span>
           <Button
             variant="outline"
             size="sm"
             onClick={() => navigate("/radar")}
-            className="nb-border gap-1.5 bg-card px-2.5 text-xs font-bold"
+            className="nb-border hidden bg-card px-2.5 text-xs font-bold sm:inline-flex"
           >
             <Radio className="size-3.5" />
             Radar
@@ -155,7 +155,7 @@ export default function Dashboard() {
             variant="outline"
             size="sm"
             onClick={() => navigate("/memory")}
-            className="nb-border gap-1.5 bg-card px-2.5 text-xs font-bold"
+            className="nb-border hidden bg-card px-2.5 text-xs font-bold sm:inline-flex"
           >
             <Brain className="size-3.5" />
             Memory
@@ -164,7 +164,7 @@ export default function Dashboard() {
             variant="outline"
             size="sm"
             onClick={() => navigate("/knowledge-base")}
-            className="nb-border gap-1.5 bg-card px-2.5 text-xs font-bold"
+            className="nb-border hidden bg-card px-2.5 text-xs font-bold md:inline-flex"
           >
             <BookOpen className="size-3.5" />
             Knowledge Base
@@ -174,10 +174,10 @@ export default function Dashboard() {
             variant="outline"
             size="sm"
             onClick={handleSignOut}
-            className="nb-border gap-1.5 bg-card px-2.5 text-xs font-bold"
+            className="nb-border bg-card px-2 sm:px-2.5 text-xs font-bold"
           >
             <LogOut className="size-3.5" />
-            Sign out
+            <span className="hidden sm:inline">Sign out</span>
           </Button>
         </div>
       </header>

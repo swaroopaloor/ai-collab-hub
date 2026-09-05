@@ -157,28 +157,45 @@
   box-shadow: 1px 1px 0 0 var(--foreground);
 }
 
-/* Time travel scrubber (range input) */
-.time-scrubber::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
+/* Time travel scrubber — custom pointer-driven track */
+.time-scrubber-track {
+  border: 2px solid var(--foreground);
+  cursor: grab;
+  min-height: 8px;
+}
+.time-scrubber-track:active {
+  cursor: grabbing;
+}
+.time-scrubber-thumb {
   width: 14px;
   height: 22px;
   border: 2px solid var(--foreground);
   background: var(--primary);
   cursor: grab;
+  will-change: left;
+  pointer-events: none;
 }
-.time-scrubber::-webkit-slider-thumb:active {
+.time-scrubber-track:active .time-scrubber-thumb {
   cursor: grabbing;
 }
-.time-scrubber::-moz-range-thumb {
-  width: 12px;
-  height: 20px;
-  border-radius: 0;
-  border: 2px solid var(--foreground);
-  background: var(--primary);
-  cursor: grab;
+.time-scrubber-track .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }
-.time-scrubber::-moz-range-track {
-  height: 100%;
-  background: transparent;
+
+/* Ensure all app content scales well */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+* {
+  max-width: 100%;
+  min-width: 0;
 }
