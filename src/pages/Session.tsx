@@ -26,13 +26,107 @@ import {
   Zap,
   CheckCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 
 const AGENT_NAME = "AI";
 const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+// ---------- Smooth scrubber ----------
+function TimeScrubber({
+  value,
+  max,
+  onCommit,
+}: {
+  value: number;
+  max: number;
+  onCommit: (v: number) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+  const liveValue = useRef(value);
+  const thumbRef = useRef<HTMLDivElement>(null);
+  const fillRef = useRef<HTMLDivElement>(null);
+  const posLabelRef = useRef<HTMLSpanElement>(null);
+
+  // Sync the visual to the React value when not dragging.
+  useEffect(() => {
+    if (dragging.current) return;
+    liveValue.current = value;
+    paint(value);
+  }, [value]);
+
+  const paint = useCallback((v: number) => {
+    const pct = max > 0 ? (v / max) * 100 : 0;
+    if (fillRef.current) fillRef.current.style.width = `${pct}%`;
+    if (thumbRef.current) thumbRef.current.style.left = `${pct}%`;
+    if (posLabelRef.current) posLabelRef.current.textContent = `${v + 1}/${max + 1}`;
+  }, [max]);
+
+  const valueFromPointer = useCallback((clientX: number) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect) return 0;
+    const pct = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+    return Math.round(pct * max);
+  }, [max]);
+
+  const onPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (max === 0) return;
+    dragging.current = true;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    const v = valueFromPointer(e.clientX);
+    liveValue.current = v;
+    paint(v);
+  }, [max, valueFromPointer, paint]);
+
+  const onPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    const v = valueFromPointer(e.clientX);
+    liveValue.current = v;
+    paint(v);
+  }, [valueFromPointer, paint]);
+
+  const onPointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    const v = valueFromPointer(e.clientX);
+    onCommit(v);
+  }, [valueFromPointer, onCommit]);
+
+  const pct = max > 0 ? (value / max) * 100 : 0;
+
+  return (
+    <div
+      ref={trackRef}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      className="time-scrubber-track relative h-2 w-full touch-none select-none bg-secondary"
+      role="slider"
+      aria-label="Scrub session timeline"
+      aria-valuemin={0}
+      aria-valuemax={max}
+      aria-valuenow={value}
+    >
+      <div
+        ref={fillRef}
+        className="absolute inset-y-0 left-0 bg-[#4DA6FF]"
+        style={{ width: `${pct}%` }}
+      />
+      <div
+        ref={thumbRef}
+        className="time-scrubber-thumb absolute top-1/2 -translate-y-1/2 -translate-x-1/2"
+        style={{ left: `${pct}%` }}
+      />
+      <span ref={posLabelRef} className="sr-only">
+        Position {value + 1} of {max + 1}
+      </span>
+    </div>
+  );
+}
 
 export type SessionData = {
   _id: string;
@@ -702,108 +796,9 @@ export default function Session() {
             </form>
           </div>
 
-          {/* Time travel scrubber */}
-          <div className="nb-border flex shrink-0 items-center gap-2 border-x-0 border-b-0 bg-card px-3 py-2 sm:gap-3 sm:px-5">
-            <button
-              onClick={() => seek(0)}
-              disabled={maxIndex === 0}
-              title="Jump to start"
-              aria-label="Jump to start of timeline"
-              className="nb-border nb-lift flex size-7 shrink-0 items-center justify-center bg-secondary disabled:opacity-40"
-            >
-              <SkipBack className="size-3.5" />
-            </button>
-            <button
-              onClick={() => setReplaying((r) => !r)}
-              disabled={maxIndex === 0 || (!timeTraveling && viewIndex === null)}
-              title={replaying ? "Pause replay" : "Replay from here"}
-              aria-label={replaying ? "Pause replay" : "Replay timeline"}
-              className="nb-border nb-lift flex size-7 shrink-0 items-center justify-center bg-primary text-black disabled:opacity-40"
-            >
-              {replaying ? <Square className="size-3" /> : <Play className="size-3.5" />}
-            </button>
-            <input
-              type="range"
-              min={0}
-              max={maxIndex}
-              step={1}
-              value={effectiveIndex}
-              onChange={(e) => seek(Number(e.target.value))}
-              disabled={maxIndex === 0}
-              aria-label="Scrub session timeline"
-              className="time-scrubber h-2 min-w-0 flex-1 cursor-pointer appearance-none border-2 border-foreground bg-secondary"
-            />
-            <span className="hidden shrink-0 text-[10px] font-black uppercase tracking-widest sm:inline">
-              {timeTraveling ? (
-                <>
-                  POS {effectiveIndex + 1}/{maxIndex + 1}
-                </>
-              ) : (
-                <>LIVE · {maxIndex + 1} events</>
-              )}
-            </span>
-            {timeTraveling ? (
-              <>
-                <Button
-                  size="sm"
-                  onClick={() => void handleFork()}
-                  disabled={forking}
-                  className="nb-border nb-lift h-7 shrink-0 bg-[#B57BFF] px-2 text-[10px] font-black text-black sm:px-3 sm:text-xs"
-                >
-                  <GitFork className="size-3.5" />
-                  Fork from here
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setReplaying(false);
-                    setViewIndex(null);
-                  }}
-                  className="nb-border nb-lift h-7 shrink-0 bg-[#4DA6FF] px-2 text-[10px] font-black text-black sm:px-3 sm:text-xs"
-                >
-                  <Radio className="size-3.5" />
-                  Live
-                </Button>
-              </>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setViewIndex(maxIndex - 1)}
-                disabled={maxIndex === 0}
-                title="Step back one event"
-                className="nb-border nb-lift h-7 shrink-0 bg-card px-2 text-[10px] font-bold sm:px-3 sm:text-xs"
-              >
-                <History className="size-3.5" />
-                Rewind
-              </Button>
-            )}
-          </div>
+    
 
-          {/* State legend strip */}
-          <div
-            className={`nb-border flex shrink-0 items-center justify-center gap-3 border-x-0 border-b-0 px-4 py-1 text-[10px] font-black uppercase tracking-widest ${stateStyle.className}`}
-          >
-            <span>{stateStyle.label}</span>
-            {agentActive && (
-              <span className="flex items-center gap-1">
-                <span className="size-1.5 animate-pulse rounded-full bg-current" />
-                live
-              </span>
-            )}
-            {session.autonomousScope && session.autonomousScope !== "off" && (
-              <span className="flex items-center gap-1">
-                <Zap className="size-2.5" />
-                autonomous: {session.autonomousScope}
-              </span>
-            )}
-            {(session.handoffCount ?? 0) > 0 && (
-              <span className="flex items-center gap-1">
-                <GitFork className="size-2.5" />
-                {session.handoffCount} handoff{(session.handoffCount ?? 0) !== 1 ? "s" : ""}
-              </span>
-            )}
-          </div>
+    
         </div>
       </div>
     </div>
