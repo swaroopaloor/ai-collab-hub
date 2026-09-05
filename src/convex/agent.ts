@@ -20,7 +20,7 @@ import { type Id } from "./_generated/dataModel";
 // loop, interruption handling, attribution and summaries.
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+const GROQ_MODEL = "openai/gpt-oss-120b";
 
 const AGENT_NAME = "ox-alpha";
 
