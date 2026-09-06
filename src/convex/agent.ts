@@ -50,13 +50,23 @@ function resolveModel(): ModelBackend | null {
 
 function runMockTool(name: string, input: string): string {
   switch (name) {
-    case "search_knowledge_base": {
+    case "search_knowledge_base": {      // If the tool call asked about something, always return useful mock data.
       return JSON.stringify(
         {
           results: [
             {
               title: `KB: Getting started with "${input}"`,
               excerpt: `Our docs recommend starting small. Teams that adopted ${input} saw onboarding time drop by ~40%. Key steps: 1) define scope, 2) assign a driver, 3) review weekly.`,
+            },
+            {
+              title: `KB: ${input} — FAQ`,
+              excerpt: `Common questions about ${input}:
+
+Q: How do I get started?
+A: Start by defining the scope and timeline, then assign a driver. Review progress weekly.
+
+Q: What are the common pitfalls?
+A: Going too big too fast, skipping the review step, and not assigning owners.`,
             },
           ],
         },
@@ -97,8 +107,9 @@ function runMockTool(name: string, input: string): string {
           ],
         }, null, 2);
       }
-      return JSON.stringify({ memories: [] }, null, 2);
+        return JSON.stringify({ memories: [] }, null, 2);
     }
+    // If no memories found, return empty but don't error out.
     case "save_memory": {
       const pipeIdx = input.indexOf("|");
       const tagsPart = pipeIdx >= 0 ? input.slice(0, pipeIdx) : "";
@@ -517,7 +528,7 @@ export const runTurn = internalAction({
         // Attribution: who prompted this turn (last human to @mention).
         const mentionMsg = [...events]
           .reverse()
-          .find((e) => e.type === "message" && /@(claude|agent|ai)\b/i.test(e.content));
+          .find((e) => e.type === "message" && /@(claude|agent|ai|kb)\b/i.test(e.content));
         const attribution = mentionMsg?.authorName ?? pendingHuman[0]?.authorName ?? "the team";
 
         const interruptionNote =
