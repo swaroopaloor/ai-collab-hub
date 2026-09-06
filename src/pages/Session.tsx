@@ -23,6 +23,7 @@ import { InfoTip } from "@/components/RoleSelection";
 import { STATE_STYLES, StatusChip } from "@/pages/Dashboard";
 import {
   ArrowLeft,
+  ArrowUpDown,
   Bot,
   Check,
   Copy,
@@ -31,6 +32,7 @@ import {
   GitFork,
   History,
   Info,
+  LoaderCircle,
   Menu,
   Pause,
   Play,
@@ -271,12 +273,9 @@ function Cursor({ p }: { p: PresenceData }) {
         <path d="M4 2 L20 12 L12 13 L9 21 Z" />
       </svg>
       <span
-        className="nb-border absolute top-3.5 left-3 whitespace-nowrap px-1 py-px text-[10px] font-bold text-black"
+        className="absolute top-3.5 left-3 size-2.5 rounded-full border border-black"
         style={{ background: p.color }}
-      >
-        {p.name}
-        {p.focus ? ` · ${p.focus}` : ""}
-      </span>
+      />
     </div>
   );
 }
@@ -311,6 +310,9 @@ export default function Session() {
   const requestSummary = useMutation(api.events.requestSummary);
   const joinSessionMut = useMutation(api.sessions.joinSession);
   const forkSessionMut = useMutation(api.sessions.forkSession);
+  const requestRoleChangeMut = useMutation(api.sessions.requestRoleChange);
+  const decideRoleChangeMut = useMutation(api.sessions.decideRoleChange);
+  const driverSetParticipantRoleMut = useMutation(api.sessions.driverSetParticipantRole);
 
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -332,6 +334,15 @@ export default function Session() {
   const myRequest = useQuery(
     api.sessions.myJoinRequest,
     sessionId && !isMember ? { sessionId: sessionId as never } : "skip",
+  );
+  // Role change requests (driver sees pending ones, all users see their own).
+  const pendingRoleChanges = useQuery(
+    api.sessions.pendingRoleChangeRequests,
+    sessionId ? { sessionId: sessionId as never } : "skip",
+  );
+  const myRoleChangeRequest = useQuery(
+    api.sessions.myRoleChangeRequest,
+    sessionId ? { sessionId: sessionId as never } : "skip",
   );
   const isPendingApproval = myRequest?.status === "pending";
   const isDenied = myRequest?.status === "denied";
@@ -733,27 +744,39 @@ export default function Session() {
                       <p className="truncate text-sm font-semibold">{p.name}</p>
                       <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
                         {p.role}
+                        {p.userId === myPart?.userId && " (you)"}
                       </p>
                     </div>
-                    {p.userId === myPart?.userId && (
-                      <select
-                        value={p.role}
-                        onChange={(e) =>
-                          void setMyRole({
-                            sessionId: session._id as never,
-                            role: e.target.value as "driver" | "copilot" | "observer",
-                          })
-                        }
-                        className="cursor-pointer nb-border bg-card px-1 py-0.5 text-[10px] font-bold"
-                        aria-label="Change your role"
-                      >
-                        <option value="driver">→ driver</option>
-                        <option value="copilot">→ co-pilot</option>
-                        <option value="observer">→ observer</option>
-                      </select>
-                    )}
                   </div>
                 ))}
+                {/* Role change requests for driver */}
+                {(myRole === "driver" || session?.createdBy === myPart?.userId) && (pendingRoleChanges?.length ?? 0) > 0 && (
+                  <div className="border-t border-foreground/10 p-4">
+                    <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                      <ArrowUpDown className="mr-1 inline size-3" />
+                      Role change requests
+                    </p>
+                    {pendingRoleChanges?.map((req) => (
+                      <div key={req._id} className="nb-border mb-1.5 flex items-center justify-between bg-card px-2 py-1.5">
+                        <span className="text-[10px] font-bold">{req.name}: {req.currentRole} → {req.requestedRole}</span>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => void decideRoleChangeMut({ requestId: req._id as never, decision: "approved" })}
+                            className="nb-border bg-[#2ECC71] px-1.5 py-0.5 text-[9px] font-bold text-black"
+                          >
+                            ✓
+                          </button>
+                          <button
+                            onClick={() => void decideRoleChangeMut({ requestId: req._id as never, decision: "denied" })}
+                            className="nb-border bg-[#FF5C5C] px-1.5 py-0.5 text-[9px] font-bold text-white"
+                          >
+                            ✗
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {(myRole === "driver" || myRole === "copilot") && (
                   <div className="border-t border-foreground/10 p-4">
                     <p className="mb-1.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -996,27 +1019,75 @@ export default function Session() {
                 <p className="truncate text-sm font-semibold">{p.name}</p>
                 <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
                   {p.role}
+                  {p.userId === myPart?.userId && " (you)"}
                 </p>
               </div>
-              {p.userId === myPart?.userId && (
-                <select
-                  value={p.role}
-                  onChange={(e) =>
-                    void setMyRole({
-                      sessionId: session._id as never,
-                      role: e.target.value as "driver" | "copilot" | "observer",
-                    })
-                  }
-                  className="cursor-pointer nb-border bg-card px-1 py-0.5 text-[10px] font-bold"
-                  aria-label="Change your role"
-                >
-                  <option value="driver">→ driver</option>
-                  <option value="copilot">→ co-pilot</option>
-                  <option value="observer">→ observer</option>
-                </select>
-              )}
             </div>
           ))}
+
+          {/* Role change request button for non-drivers */}
+          {myRole && myRole !== "driver" && !myRoleChangeRequest && !timeTraveling && (
+            <div className="border-t border-foreground/10 p-4">
+              <p className="mb-1.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                <ArrowUpDown className="mr-1 inline size-3" />
+                Request role change
+                <InfoTip text="Ask the driver to change your role. You'll need to wait for their approval." />
+              </p>
+              <div className="flex gap-1">
+                {(["driver", "copilot", "observer"] as const).filter((r) => r !== myRole).map((targetRole) => (
+                  <button
+                    key={targetRole}
+                    onClick={() =>
+                      void requestRoleChangeMut({
+                        sessionId: session._id as never,
+                        requestedRole: targetRole,
+                      })
+                    }
+                    className="nb-border nb-lift flex-1 bg-card px-1.5 py-1 text-[9px] font-bold hover:bg-secondary"
+                  >
+                    → {targetRole}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {myRoleChangeRequest && (
+            <div className="border-t border-foreground/10 px-4 py-3">
+              <p className="text-[10px] text-muted-foreground">
+                <LoaderCircle className="mr-1 inline size-3 animate-spin" />
+                Pending: {myRoleChangeRequest.currentRole} → {myRoleChangeRequest.requestedRole}
+              </p>
+            </div>
+          )}
+
+          {/* Driver: pending role change requests */}
+          {(myRole === "driver" || session?.createdBy === myPart?.userId) && (pendingRoleChanges?.length ?? 0) > 0 && (
+            <div className="border-t border-foreground/10 p-4">
+              <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                <ArrowUpDown className="mr-1 inline size-3" />
+                Role change requests
+              </p>
+              {pendingRoleChanges?.map((req) => (
+                <div key={req._id} className="nb-border mb-1.5 flex items-center justify-between bg-card px-2 py-1.5">
+                  <span className="text-[10px] font-bold">{req.name}: {req.currentRole} → {req.requestedRole}</span>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => void decideRoleChangeMut({ requestId: req._id as never, decision: "approved" })}
+                      className="nb-border bg-[#2ECC71] px-1.5 py-0.5 text-[9px] font-bold text-black"
+                    >
+                      ✓
+                    </button>
+                    <button
+                      onClick={() => void decideRoleChangeMut({ requestId: req._id as never, decision: "denied" })}
+                      className="nb-border bg-[#FF5C5C] px-1.5 py-0.5 text-[9px] font-bold text-white"
+                    >
+                      ✗
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {(myRole === "driver" || myRole === "copilot") && (
             <div className="border-t border-foreground/10 p-4">
@@ -1145,14 +1216,15 @@ export default function Session() {
                   <Button
                     type="button"
                     onClick={() =>
-                      void setMyRole({
+                      void requestRoleChangeMut({
                         sessionId: session._id as never,
-                        role: "copilot",
+                        requestedRole: "copilot",
                       })
                     }
+                    disabled={!!myRoleChangeRequest}
                     className="nb-border nb-lift h-9 sm:h-10 bg-accent px-3 sm:px-5 font-black"
                   >
-                    Control
+                    {myRoleChangeRequest ? "Requested" : "Request Control"}
                   </Button>
                 )
               )}

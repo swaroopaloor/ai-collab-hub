@@ -374,6 +374,264 @@ export const myJoinRequest = query({
   },
 });
 
+/** Driver approves a join request with a specific assigned role. */
+export const decideJoinRequestWithRole = mutation({
+  args: {
+    requestId: v.id("joinRequests"),
+    decision: v.union(v.literal("approved"), v.literal("denied")),
+    assignedRole: v.union(
+      v.literal("driver"),
+      v.literal("copilot"),
+      v.literal("observer"),
+    ),
+  },
+  handler: async (ctx, { requestId, decision, assignedRole }) => {
+    const userId = await requireUserId(ctx);
+    const req = await ctx.db.get(requestId);
+    if (!req) throw new Error("Join request not found");
+    if (req.status !== "pending") throw new Error("Request already decided");
+
+    const me = await ctx.db
+      .query("participants")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", req.sessionId).eq("userId", userId),
+      )
+      .first();
+    const session = await ctx.db.get(req.sessionId);
+    const isDriver = me?.role === "driver";
+    const isCreator = session?.createdBy === userId;
+    if (!isDriver && !isCreator)
+      throw new Error("Only the driver can approve join requests");
+
+    const decidedBy = await ctx.db.get(userId);
+    const finalRole = decision === "approved" ? assignedRole : req.requestedRole;
+    await ctx.db.patch(requestId, {
+      status: decision,
+      decidedAt: Date.now(),
+      decidedBy: userId,
+      assignedRole: finalRole,
+    });
+
+    if (decision === "approved") {
+      await ctx.db.insert("participants", {
+        sessionId: req.sessionId,
+        userId: req.userId,
+        role: finalRole,
+        joinedAt: Date.now(),
+      });
+      await appendEvent(ctx, req.sessionId, {
+        type: "system",
+        authorType: "human",
+        authorId: userId,
+        authorName: decidedBy?.name ?? decidedBy?.email ?? "Driver",
+        content: `approved ${req.name} joining as ${finalRole}.`,
+      });
+    } else {
+      await appendEvent(ctx, req.sessionId, {
+        type: "system",
+        authorType: "human",
+        authorId: userId,
+        authorName: decidedBy?.name ?? decidedBy?.email ?? "Driver",
+        content: `denied ${req.name}'s request to join.`,
+      });
+    }
+  },
+});
+
+/** Participant requests a role change; driver must approve. */
+export const requestRoleChange = mutation({
+  args: {
+    sessionId: v.id("sessions"),
+    requestedRole: v.union(
+      v.literal("driver"),
+      v.literal("copilot"),
+      v.literal("observer"),
+    ),
+  },
+  handler: async (ctx, { sessionId, requestedRole }) => {
+    const userId = await requireUserId(ctx);
+    const me = await ctx.db
+      .query("participants")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", sessionId).eq("userId", userId),
+      )
+      .first();
+    if (!me) throw new Error("Not a participant");
+    const user = await ctx.db.get(userId);
+    const displayName = user?.name ?? user?.email ?? "Someone";
+
+    if (me.role === requestedRole) throw new Error("Already have that role");
+
+    // Check for existing pending request.
+    const existing = await ctx.db
+      .query("roleChangeRequests")
+      .withIndex("by_session_status", (q) =>
+        q.eq("sessionId", sessionId).eq("status", "pending"),
+      )
+      .collect();
+    const mine = existing.find((r) => r.userId === userId);
+    if (mine) throw new Error("You already have a pending role change request");
+
+    await ctx.db.insert("roleChangeRequests", {
+      sessionId,
+      userId,
+      name: displayName,
+      currentRole: me.role,
+      requestedRole,
+      status: "pending",
+      createdAt: Date.now(),
+    });
+
+    await appendEvent(ctx, sessionId, {
+      type: "system",
+      authorType: "human",
+      authorId: userId,
+      authorName: displayName,
+      content: `is requesting to change role from ${me.role} to ${requestedRole}...`,
+    });
+  },
+});
+
+/** Driver approves or denies a role change request. */
+export const decideRoleChange = mutation({
+  args: {
+    requestId: v.id("roleChangeRequests"),
+    decision: v.union(v.literal("approved"), v.literal("denied")),
+  },
+  handler: async (ctx, { requestId, decision }) => {
+    const userId = await requireUserId(ctx);
+    const req = await ctx.db.get(requestId);
+    if (!req) throw new Error("Role change request not found");
+    if (req.status !== "pending") throw new Error("Request already decided");
+
+    const me = await ctx.db
+      .query("participants")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", req.sessionId).eq("userId", userId),
+      )
+      .first();
+    const session = await ctx.db.get(req.sessionId);
+    const isDriver = me?.role === "driver";
+    const isCreator = session?.createdBy === userId;
+    if (!isDriver && !isCreator)
+      throw new Error("Only the driver can approve role changes");
+
+    const decidedBy = await ctx.db.get(userId);
+    await ctx.db.patch(requestId, {
+      status: decision,
+      decidedAt: Date.now(),
+      decidedBy: userId,
+    });
+
+    if (decision === "approved") {
+      // Update the participant's role.
+      const participant = await ctx.db
+        .query("participants")
+        .withIndex("by_session_user", (q) =>
+          q.eq("sessionId", req.sessionId).eq("userId", req.userId),
+        )
+        .first();
+      if (participant) {
+        await ctx.db.patch(participant._id, { role: req.requestedRole });
+      }
+      await appendEvent(ctx, req.sessionId, {
+        type: "system",
+        authorType: "human",
+        authorId: userId,
+        authorName: decidedBy?.name ?? decidedBy?.email ?? "Driver",
+        content: `changed ${req.name}'s role from ${req.currentRole} to ${req.requestedRole}.`,
+      });
+    } else {
+      await appendEvent(ctx, req.sessionId, {
+        type: "system",
+        authorType: "human",
+        authorId: userId,
+        authorName: decidedBy?.name ?? decidedBy?.email ?? "Driver",
+        content: `denied ${req.name}'s request to change from ${req.currentRole} to ${req.requestedRole}.`,
+      });
+    }
+  },
+});
+
+/** Get pending role change requests for a session (driver sees these). */
+export const pendingRoleChangeRequests = query({
+  args: { sessionId: v.id("sessions") },
+  handler: async (ctx, { sessionId }) => {
+    return await ctx.db
+      .query("roleChangeRequests")
+      .withIndex("by_session_status", (q) =>
+        q.eq("sessionId", sessionId).eq("status", "pending"),
+      )
+      .collect();
+  },
+});
+
+/** Get my pending role change request for a session. */
+export const myRoleChangeRequest = query({
+  args: { sessionId: v.id("sessions") },
+  handler: async (ctx, { sessionId }) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return null;
+    const pending = await ctx.db
+      .query("roleChangeRequests")
+      .withIndex("by_session_status", (q) =>
+        q.eq("sessionId", sessionId).eq("status", "pending"),
+      )
+      .collect();
+    return pending.find((r) => r.userId === userId) ?? null;
+  },
+});
+
+/** Driver directly changes a participant's role (no request needed). */
+export const driverSetParticipantRole = mutation({
+  args: {
+    sessionId: v.id("sessions"),
+    targetUserId: v.id("users"),
+    role: v.union(
+      v.literal("driver"),
+      v.literal("copilot"),
+      v.literal("observer"),
+    ),
+  },
+  handler: async (ctx, { sessionId, targetUserId, role }) => {
+    const userId = await requireUserId(ctx);
+    const me = await ctx.db
+      .query("participants")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", sessionId).eq("userId", userId),
+      )
+      .first();
+    const session = await ctx.db.get(sessionId);
+    const isDriver = me?.role === "driver";
+    const isCreator = session?.createdBy === userId;
+    if (!isDriver && !isCreator)
+      throw new Error("Only the driver can change roles");
+
+    const target = await ctx.db
+      .query("participants")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", sessionId).eq("userId", targetUserId),
+      )
+      .first();
+    if (!target) throw new Error("Target user not a participant");
+    if (target.role === role) return;
+
+    const targetUser = await ctx.db.get(targetUserId);
+    const targetName = targetUser?.name ?? targetUser?.email ?? "Someone";
+    const driverUser = await ctx.db.get(userId);
+    const driverName = driverUser?.name ?? driverUser?.email ?? "Driver";
+
+    await ctx.db.patch(target._id, { role });
+    await appendEvent(ctx, sessionId, {
+      type: "system",
+      authorType: "human",
+      authorId: userId,
+      authorName: driverName,
+      content: `changed ${targetName}'s role from ${target.role} to ${role}.`,
+    });
+  },
+});
+
 export const setMyRole = mutation({
   args: {
     sessionId: v.id("sessions"),
@@ -392,21 +650,26 @@ export const setMyRole = mutation({
       )
       .first();
     if (!me) throw new Error("Not a participant");
+
+    // Only the driver can change roles directly.
+    // Non-drivers must use requestRoleChange.
+    const session = await ctx.db.get(sessionId);
+    const isDriver = me.role === "driver";
+    const isCreator = session?.createdBy === userId;
+    if (!isDriver && !isCreator)
+      throw new Error("Only the driver can change roles directly. Use requestRoleChange instead.");
+
     const user = await ctx.db.get(userId);
     const displayName = user?.name ?? user?.email ?? "Someone";
 
-    if (me.role === "observer" && role !== "observer") {
-      await appendEvent(ctx, sessionId, {
-        type: "intervention",
-        authorType: "human",
-        authorId: userId,
-        authorName: displayName,
-        content: `${displayName} requested control and became ${
-          role === "driver" ? "driver" : "co-pilot"
-        }.`,
-      });
-    }
     await ctx.db.patch(me._id, { role });
+    await appendEvent(ctx, sessionId, {
+      type: "system",
+      authorType: "human",
+      authorId: userId,
+      authorName: displayName,
+      content: `changed their own role to ${role}.`,
+    });
   },
 });
 
