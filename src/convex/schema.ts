@@ -107,6 +107,21 @@ const schema = defineSchema(
     })
       .index("by_session_seq", ["sessionId", "seq"]),
 
+    // Join requests: new users request to join; driver must approve.
+    joinRequests: defineTable({
+      sessionId: v.id("sessions"),
+      userId: v.id("users"),
+      requestedRole: participantRoleValidator,
+      name: v.string(),
+      status: v.union(v.literal("pending"), v.literal("approved"), v.literal("denied")),
+      createdAt: v.number(),
+      decidedAt: v.optional(v.number()),
+      decidedBy: v.optional(v.id("users")),
+    })
+      .index("by_session", ["sessionId"])
+      .index("by_session_user", ["sessionId", "userId"])
+      .index("by_session_status", ["sessionId", "status"]),
+
     // Approval gates: agent proposes a change → pauses → reviewers decide.
     approvalGates: defineTable({
       sessionId: v.id("sessions"),

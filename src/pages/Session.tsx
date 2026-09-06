@@ -1,9 +1,25 @@
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import ReviewGatePanel from "@/components/ReviewGatePanel";
 import AwayBriefing from "@/components/AwayBriefing";
 import HandoffDialog from "@/components/HandoffDialog";
+import JoinApprovalBanner from "@/components/JoinApprovalBanner";
+import RoleSelection from "@/components/RoleSelection";
+import WaitingForApproval from "@/components/WaitingForApproval";
+import { InfoTip } from "@/components/RoleSelection";
 import { STATE_STYLES, StatusChip } from "@/pages/Dashboard";
 import {
   ArrowLeft,
@@ -14,6 +30,8 @@ import {
   GitBranch,
   GitFork,
   History,
+  Info,
+  Menu,
   Pause,
   Play,
   Radio,
@@ -185,6 +203,7 @@ export type SessionData = {
   title: string;
   state: "running" | "paused" | "awaiting_input" | "done";
   joinCode: string;
+  createdBy: string;
   agentActivity?: string | null;
   createdAt?: number;
   // Time travel lineage
@@ -300,6 +319,7 @@ export default function Session() {
   const [viewIndex, setViewIndex] = useState<number | null>(null);
   const [replaying, setReplaying] = useState(false);
   const [forking, setForking] = useState(false);
+  const [mobileSidebar, setMobileSidebar] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const lastCursorSent = useRef(0);
@@ -308,12 +328,19 @@ export default function Session() {
   const isMember = !!myPart;
   const canPost = isMember && myRole !== "observer" && session?.state !== "done";
 
-  // Auto-join when arriving via a direct link.
-  useEffect(() => {
-    if (sessionId && session && !isMember && myPart !== undefined) {
-      void joinSessionMut({ sessionId: sessionId as never, role: "copilot" }).catch(() => {});
-    }
-  }, [sessionId, session, isMember, myPart, joinSessionMut]);
+  // Check for my pending join request.
+  const myRequest = useQuery(
+    api.sessions.myJoinRequest,
+    sessionId && !isMember ? { sessionId: sessionId as never } : "skip",
+  );
+  const isPendingApproval = myRequest?.status === "pending";
+  const isDenied = myRequest?.status === "denied";
+
+  // Once approved, refetch participant data (handled reactively by Convex).
+
+
+  // If session loaded but user is not a member and has no pending request,
+  // they need to select a role (handled below in the render).
 
   // One-time catch-up summary for mid-session joiners.
   const summaryRequested = useRef(false);
@@ -416,6 +443,9 @@ export default function Session() {
     (displayState === "running" ||
       (!!session?.agentActivity && displayState !== "paused"));
 
+  // --- Join approval banner (driver sees pending requests) ---
+  const showJoinBanner = (myRole === "driver" || session?.createdBy === myPart?.userId) && !timeTraveling;
+
   // Replay animation: walk forward through history.
   useEffect(() => {
     if (!replaying) return;
@@ -497,6 +527,43 @@ export default function Session() {
     );
   }
 
+  // --- Join flow: role selection → waiting for approval → denied ---
+  if (!isMember && !isPendingApproval) {
+    return (
+      <RoleSelection
+        sessionId={sessionId as string}
+        sessionTitle={session.title}
+        onBack={() => navigate("/dashboard")}
+      />
+    );
+  }
+  if (!isMember && isPendingApproval) {
+    return (
+      <WaitingForApproval
+        sessionTitle={session.title}
+        requestedRole={myRequest?.requestedRole ?? "copilot"}
+      />
+    );
+  }
+  if (!isMember && isDenied) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background p-4">
+        <div className="nb-border nb-shadow max-w-sm bg-card p-8 text-center">
+          <p className="text-lg font-black uppercase">Request denied</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            The driver has denied your request to join this session.
+          </p>
+        </div>
+        <Button
+          onClick={() => navigate("/dashboard")}
+          className="nb-border nb-lift bg-primary font-bold text-black"
+        >
+          Back to sessions
+        </Button>
+      </div>
+    );
+  }
+
   const stateStyle = STATE_STYLES[displayState];
 
   return (
@@ -515,6 +582,7 @@ export default function Session() {
           {session.title}
         </h1>
         <StatusChip state={displayState} />
+        <InfoTip text="This shows the current session state. Running = AI is active. Paused = AI stopped. Awaiting Input = waiting for human input. Done = session complete." />
         {timeTraveling && (
           <span className="nb-border hidden items-center gap-1.5 bg-[#4DA6FF] px-2 py-0.5 text-[10px] font-bold text-black md:inline-flex">
             <History className="size-3 animate-pulse" />
@@ -576,32 +644,170 @@ export default function Session() {
                 </Button>
               </>
             )}
-          <Button
-            size="sm"
-            onClick={copyShareLink}
-            className="nb-border nb-lift h-7 bg-primary font-bold text-black sm:h-8"
-          >
-            {copiedLink ? (
-              <Check className="size-3.5" />
-            ) : (
-              <Copy className="size-3.5" />
-            )}
-            <span className="hidden sm:inline">Share</span>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                onClick={copyShareLink}
+                className="nb-border nb-lift h-7 bg-primary font-bold text-black sm:h-8"
+              >
+                {copiedLink ? (
+                  <Check className="size-3.5" />
+                ) : (
+                  <Copy className="size-3.5" />
+                )}
+                <span className="hidden sm:inline">Share</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="nb-border bg-card text-card-foreground">
+              <p className="text-[11px]">Copy the invite link. New members need driver approval to join.</p>
+            </TooltipContent>
+          </Tooltip>
           {myRole === "driver" && (
-            <div className="relative hidden sm:block">
+            <div className="relative">
               <HandoffDialog
                 sessionId={sessionId as string}
                 participants={session.participants}
               />
             </div>
           )}
+          <Sheet open={mobileSidebar} onOpenChange={setMobileSidebar}>
+            <SheetTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="nb-border size-8 bg-card px-0 lg:hidden"
+              >
+                <Menu className="size-4" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="nb-border w-72 p-0">
+              <SheetHeader className="border-b-2 border-foreground px-4 py-3">
+                <SheetTitle className="text-xs font-black uppercase tracking-widest">
+                  Session Panel
+                </SheetTitle>
+              </SheetHeader>
+              <div className="flex flex-col overflow-y-auto">
+                {/* Participants */}
+                <p className="border-b-2 border-foreground px-4 py-2.5 text-[10px] font-black uppercase tracking-widest">
+                  Participants · {(session.participants.length ?? 0)}
+                </p>
+                {/* Agent */}
+                <div className="flex items-start gap-2.5 border-b-2 border-foreground px-4 py-3">
+                  <span
+                    className={`nb-border mt-0.5 flex size-7 shrink-0 items-center justify-center ${
+                      agentActive
+                        ? "animate-pulse bg-primary"
+                        : session.state === "paused"
+                          ? "bg-[#FF9440]"
+                          : "bg-secondary"
+                    }`}
+                  >
+                    <Bot className="size-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold">{AGENT_NAME} · AI agent</p>
+                    <p className="text-[11px] leading-tight text-muted-foreground">
+                      {session.state === "running"
+                        ? (session.agentActivity ?? "Acting now")
+                        : session.state === "paused"
+                          ? "Paused by the team"
+                          : session.state === "done"
+                            ? "Finished for this session"
+                            : "Waiting for input"}
+                    </p>
+                  </div>
+                </div>
+                {session.participants.map((p) => (
+                  <div
+                    key={p._id}
+                    className="flex items-center gap-2.5 border-b border-foreground/10 px-4 py-2.5"
+                  >
+                    <span
+                      className="mt-0.5 flex size-7 shrink-0 items-center justify-center nb-border text-[10px] font-black text-black"
+                      style={{ background: presenceColorFor(p.userId) }}
+                    >
+                      {p.name.slice(0, 1).toUpperCase()}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{p.name}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                        {p.role}
+                      </p>
+                    </div>
+                    {p.userId === myPart?.userId && (
+                      <select
+                        value={p.role}
+                        onChange={(e) =>
+                          void setMyRole({
+                            sessionId: session._id as never,
+                            role: e.target.value as "driver" | "copilot" | "observer",
+                          })
+                        }
+                        className="cursor-pointer nb-border bg-card px-1 py-0.5 text-[10px] font-bold"
+                        aria-label="Change your role"
+                      >
+                        <option value="driver">→ driver</option>
+                        <option value="copilot">→ co-pilot</option>
+                        <option value="observer">→ observer</option>
+                      </select>
+                    )}
+                  </div>
+                ))}
+                {(myRole === "driver" || myRole === "copilot") && (
+                  <div className="border-t border-foreground/10 p-4">
+                    <p className="mb-1.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                      <Zap className="mr-1 inline size-3" />
+                      Autonomous mode
+                    </p>
+                    <div className="flex gap-1">
+                      {["off", "research_only", "full"].map((scope) => (
+                        <button
+                          key={scope}
+                          onClick={() => {
+                            void setAutonomousScope({
+                              sessionId: session._id as never,
+                              scope,
+                            });
+                            setMobileSidebar(false);
+                          }}
+                          className={`nb-border flex-1 px-1.5 py-1 text-[9px] font-bold ${
+                            (session.autonomousScope ?? "off") === scope
+                              ? "bg-primary text-black"
+                              : "bg-background hover:bg-secondary"
+                          }`}
+                        >
+                          {scope === "off" ? "Off" : scope === "research_only" ? "Research" : "Full"}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-[9px] text-muted-foreground">
+                      Agent continues working when no one is present.
+                    </p>
+                  </div>
+                )}
+                <div className="mt-auto p-4">
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    <Eye className="mr-1 inline size-3" />
+                    Observers are read-only and can request control at any time.
+                  </p>
+                </div>
+              </div>
+            </SheetContent>
+          </Sheet>
           <ThemeToggle />
         </div>
       </header>
 
+      {/* Join approval banner — driver sees pending requests */}
+      {showJoinBanner && (
+        <JoinApprovalBanner sessionId={sessionId as string} />
+      )}
+
       {/* Time travel scrubber + controls — always visible at the top */}
       <div className="nb-border flex shrink-0 items-center gap-2 border-x-0 border-t-0 bg-card px-3 py-2 sm:gap-3 sm:px-5">
+        <InfoTip text="Scrub the timeline to see past events. Drag or click to travel to any point. Use Fork to create a new branch from that point. Use Live to return to the present." />
+
         <button
           onClick={() => seek(0)}
           disabled={maxIndex === 0}
@@ -745,6 +951,7 @@ export default function Session() {
         <aside className="nb-border hidden flex-col overflow-y-auto border-b-0 border-l-0 bg-card lg:flex">
           <p className="border-b-2 border-foreground px-4 py-2.5 text-[10px] font-black uppercase tracking-widest">
             Participants · {(session.participants.length ?? 0)}
+            <InfoTip text="Team members currently in this session. Each person has a role: Driver controls the session, Co-pilot collaborates, Observer watches without interacting." />
           </p>
           {/* Agent */}
           <div className="flex items-start gap-2.5 border-b-2 border-foreground px-4 py-3">
@@ -760,7 +967,9 @@ export default function Session() {
               <Bot className="size-4" />
             </span>
             <div className="min-w-0">
-              <p className="text-sm font-bold">{AGENT_NAME} · AI agent</p>
+              <p className="text-sm font-bold">{AGENT_NAME} · AI agent
+                <InfoTip text="Your AI teammate. It processes messages with @agent mentions, can research, write code, and propose changes. Use autonomous mode to let it work independently." />
+              </p>
               <p className="text-[11px] leading-tight text-muted-foreground">
                 {session.state === "running"
                   ? (session.agentActivity ?? "Acting now")
@@ -814,6 +1023,7 @@ export default function Session() {
               <p className="mb-1.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                 <Zap className="mr-1 inline size-3" />
                 Autonomous mode
+                <InfoTip text="Let the AI agent work independently. Off = waits for humans. Research = only researches without making changes. Full = acts on its own (may propose changes for review)." />
               </p>
               <div className="flex gap-1">
                 {["off", "research_only", "full"].map((scope) => (
@@ -841,10 +1051,10 @@ export default function Session() {
             </div>
           )}
 
-          <div className="mt-auto p-4">
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
+          <div className="mt-auto p-4">              <p className="text-[11px] leading-relaxed text-muted-foreground">
               <Eye className="mr-1 inline size-3" />
               Observers are read-only and can request control at any time.
+              <InfoTip text="You're currently in read-only mode. You can watch the conversation and AI activity in real time. Click 'Control' below to request a more active role." />
             </p>
           </div>
         </aside>

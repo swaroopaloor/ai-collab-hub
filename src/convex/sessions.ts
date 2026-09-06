@@ -213,32 +213,164 @@ export const joinSession = mutation({
     if (!session) throw new Error("Session not found");
     const user = await ctx.db.get(userId);
 
+    const displayName =
+      user?.name ?? user?.email ?? `Guest ${userId.slice(-4)}`;
+
+    // Check if already a participant.
     const existing = await ctx.db
       .query("participants")
       .withIndex("by_session_user", (q) =>
         q.eq("sessionId", sessionId).eq("userId", userId),
       )
       .first();
-
-    const displayName =
-      user?.name ?? user?.email ?? `Guest ${userId.slice(-4)}`;
-
     if (existing) return existing._id;
 
-    await ctx.db.insert("participants", {
+    // Check if user is the session creator — auto-approve.
+    if (session.createdBy === userId) {
+      await ctx.db.insert("participants", {
+        sessionId,
+        userId,
+        role,
+        joinedAt: Date.now(),
+      });
+      await appendEvent(ctx, sessionId, {
+        type: "system",
+        authorType: "system",
+        authorName: "System",
+        content: `${displayName} joined as ${role}.`,
+      });
+      return null;
+    }
+
+    // Check if there's already a pending request.
+    const pendingReq = await ctx.db
+      .query("joinRequests")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", sessionId).eq("userId", userId),
+      )
+      .first();
+    if (pendingReq && pendingReq.status === "pending") return null;
+    if (pendingReq && pendingReq.status === "approved") {
+      // Already approved but not yet added — add them now.
+      await ctx.db.insert("participants", {
+        sessionId,
+        userId,
+        role: pendingReq.requestedRole,
+        joinedAt: Date.now(),
+      });
+      await appendEvent(ctx, sessionId, {
+        type: "system",
+        authorType: "system",
+        authorName: "System",
+        content: `${displayName} joined as ${pendingReq.requestedRole}.`,
+      });
+      return null;
+    }
+
+    // Create a join request for driver approval.
+    await ctx.db.insert("joinRequests", {
       sessionId,
       userId,
-      role,
-      joinedAt: Date.now(),
+      requestedRole: role,
+      name: displayName,
+      status: "pending",
+      createdAt: Date.now(),
     });
 
     await appendEvent(ctx, sessionId, {
       type: "system",
       authorType: "system",
       authorName: "System",
-      content: `${displayName} joined as ${role}.`,
+      content: `${displayName} is requesting to join as ${role}...`,
     });
     return null;
+  },
+});
+
+/** Driver approves or denies a join request. */
+export const decideJoinRequest = mutation({
+  args: {
+    requestId: v.id("joinRequests"),
+    decision: v.union(v.literal("approved"), v.literal("denied")),
+  },
+  handler: async (ctx, { requestId, decision }) => {
+    const userId = await requireUserId(ctx);
+    const req = await ctx.db.get(requestId);
+    if (!req) throw new Error("Join request not found");
+    if (req.status !== "pending") throw new Error("Request already decided");
+
+    // Only the session driver (or creator) can approve.
+    const me = await ctx.db
+      .query("participants")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", req.sessionId).eq("userId", userId),
+      )
+      .first();
+    const session = await ctx.db.get(req.sessionId);
+    const isDriver = me?.role === "driver";
+    const isCreator = session?.createdBy === userId;
+    if (!isDriver && !isCreator)
+      throw new Error("Only the driver can approve join requests");
+
+    const decidedBy = await ctx.db.get(userId);
+    await ctx.db.patch(requestId, {
+      status: decision,
+      decidedAt: Date.now(),
+      decidedBy: userId,
+    });
+
+    if (decision === "approved") {
+      // Add as participant.
+      await ctx.db.insert("participants", {
+        sessionId: req.sessionId,
+        userId: req.userId,
+        role: req.requestedRole,
+        joinedAt: Date.now(),
+      });
+      await appendEvent(ctx, req.sessionId, {
+        type: "system",
+        authorType: "human",
+        authorId: userId,
+        authorName: decidedBy?.name ?? decidedBy?.email ?? "Driver",
+        content: `approved ${req.name} joining as ${req.requestedRole}.`,
+      });
+    } else {
+      await appendEvent(ctx, req.sessionId, {
+        type: "system",
+        authorType: "human",
+        authorId: userId,
+        authorName: decidedBy?.name ?? decidedBy?.email ?? "Driver",
+        content: `denied ${req.name}'s request to join.`,
+      });
+    }
+  },
+});
+
+/** List pending join requests for a session (for the driver). */
+export const pendingJoinRequests = query({
+  args: { sessionId: v.id("sessions") },
+  handler: async (ctx, { sessionId }) => {
+    return await ctx.db
+      .query("joinRequests")
+      .withIndex("by_session_status", (q) =>
+        q.eq("sessionId", sessionId).eq("status", "pending"),
+      )
+      .collect();
+  },
+});
+
+/** Get my join request status for a session. */
+export const myJoinRequest = query({
+  args: { sessionId: v.id("sessions") },
+  handler: async (ctx, { sessionId }) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return null;
+    return await ctx.db
+      .query("joinRequests")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", sessionId).eq("userId", userId),
+      )
+      .first();
   },
 });
 
