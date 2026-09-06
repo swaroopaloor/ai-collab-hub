@@ -633,94 +633,95 @@ export default function Session() {
           <span className="nb-border hidden bg-secondary px-2 py-1 text-[10px] font-bold lg:inline">
             CODE {session.joinCode}
           </span>
-          {(myRole === "driver" || myRole === "copilot") && (
-            <>
-              {/* Pause / Resume */}
-              {session.state === "paused" || session.state === "done" ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
+          {/* Pause — available to driver and co-pilot */}
+          {(myRole === "driver" || myRole === "copilot") &&
+            session.state !== "paused" &&
+            session.state !== "done" && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      void setSessionState({
+                        sessionId: session._id as never,
+                        state: "paused",
+                      })
+                    }
+                    className="nb-border nb-lift h-7 bg-[#FF9440] font-bold text-black sm:h-8"
+                  >
+                    <Pause className="size-3.5" /> <span className="hidden sm:inline">Pause</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="nb-border bg-card text-card-foreground">
+                  <p className="text-[11px]">Pause the AI agent and freeze the session</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+          {/* Resume — driver only (from paused or done) */}
+          {myRole === "driver" &&
+            (session.state === "paused" || session.state === "done") && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      void setSessionState({
+                        sessionId: session._id as never,
+                        state: "awaiting_input",
+                      })
+                    }
+                    className="nb-border nb-lift h-7 bg-[#D9F99D] font-bold text-black sm:h-8"
+                  >
+                    <Play className="size-3.5" /> <span className="hidden sm:inline">Resume</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="nb-border bg-card text-card-foreground">
+                  <p className="text-[11px]">{session.state === "done" ? "Reopen this session and resume working" : "Resume the session from paused state"}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+          {/* Done — driver only, with confirmation dialog */}
+          {myRole === "driver" && session.state !== "done" && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
                     <Button
                       size="sm"
-                      onClick={() =>
-                        void setSessionState({
-                          sessionId: session._id as never,
-                          state: "awaiting_input",
-                        })
-                      }
-                      className="nb-border nb-lift h-7 bg-[#D9F99D] font-bold text-black sm:h-8"
+                      variant="outline"
+                      className="nb-border nb-lift h-7 bg-card font-bold sm:h-8"
                     >
-                      <Play className="size-3.5" /> <span className="hidden sm:inline">Resume</span>
+                      Done
                     </Button>
-                  </TooltipTrigger>
-                  <TooltipContent className="nb-border bg-card text-card-foreground">
-                    <p className="text-[11px]">{session.state === "done" ? "Reopen this session and resume working" : "Resume the session from paused state"}</p>
-                  </TooltipContent>
-                </Tooltip>
-              ) : (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="sm"
-                      onClick={() =>
-                        void setSessionState({
-                          sessionId: session._id as never,
-                          state: "paused",
-                        })
-                      }
-                      className="nb-border nb-lift h-7 bg-[#FF9440] font-bold text-black sm:h-8"
-                    >
-                      <Pause className="size-3.5" /> <span className="hidden sm:inline">Pause</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent className="nb-border bg-card text-card-foreground">
-                    <p className="text-[11px]">Pause the AI agent and freeze the session</p>
-                  </TooltipContent>
-                </Tooltip>
-              )}
-              {/* Done — with confirmation dialog */}
-              {session.state !== "done" && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="nb-border nb-lift h-7 bg-card font-bold sm:h-8"
-                        >
-                          Done
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent className="nb-border">
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Mark session as done?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This will end <span className="font-bold text-foreground">{session.title}</span>. The AI agent will stop and no new messages can be sent. You can reopen it later from the session header.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel className="nb-border bg-card">Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() =>
-                              void setSessionState({
-                                sessionId: session._id as never,
-                                state: "done",
-                              })
-                            }
-                            className="nb-border bg-[#FF9440] text-black hover:bg-[#FF9440]/90"
-                          >
-                            Mark as done
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </TooltipTrigger>
-                  <TooltipContent className="nb-border bg-card text-card-foreground">
-                    <p className="text-[11px]">End the session — the AI agent stops and no new messages can be sent</p>
-                  </TooltipContent>
-                </Tooltip>
-              )}
-            </>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent className="nb-border">
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Mark session as done?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will end <span className="font-bold text-foreground">{session.title}</span>. The AI agent will stop and no new messages can be sent. You can reopen it later from the session header.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel className="nb-border bg-card">Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() =>
+                          void setSessionState({
+                            sessionId: session._id as never,
+                            state: "done",
+                          })
+                        }
+                        className="nb-border bg-[#FF9440] text-black hover:bg-[#FF9440]/90"
+                      >
+                        Mark as done
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </TooltipTrigger>
+              <TooltipContent className="nb-border bg-card text-card-foreground">
+                <p className="text-[11px]">End the session — the AI agent stops and no new messages can be sent</p>
+              </TooltipContent>
+            </Tooltip>
           )}
           <Tooltip>
             <TooltipTrigger asChild>
