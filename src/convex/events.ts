@@ -19,7 +19,7 @@ export const requestSummary = mutation({
   },
 });
 
-const AGENT_MENTION = /@(claude|agent|ai)\b/i;
+const AGENT_MENTION = /@(claude|agent|ai|kb)\b/i;
 
 export const listEvents = query({
   args: { sessionId: v.id("sessions") },

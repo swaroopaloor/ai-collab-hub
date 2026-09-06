@@ -145,6 +145,10 @@ IMPORTANT: Write ALL your replies as plain conversational text — like a helpfu
 You have access to tools:
 ${TOOL_SPECS.map((t) => `- ${t.name}: ${t.description}`).join("\n")}
 
+SPECIAL TRIGGERS:
+- When a user includes @kb in their message, they are asking you to search the knowledge base. ALWAYS call the search_knowledge_base tool with the rest of their message as the query. For example: "@kb what is the refund policy" → call search_knowledge_base("refund policy")
+- When a user includes @agent or @ai in their message, they are directly addressing you. Always respond to these.
+
 HOW TO USE TOOLS:
 To call a tool, output ONLY a JSON object (nothing else):
 {"thought": "<short sentence shown to everyone>", "tool": "<tool name>", "input": "<tool input>"}
@@ -312,6 +316,17 @@ function simulateModel(conversation: ChatMessage[]): string {
   const human = extractLastHuman(lastUser.content);
   const interrupted = lastUser.content.includes("[INTERRUPTION]");
   const text = human?.text ?? "";
+
+  // @kb always triggers a knowledge base search.
+  const kbMatch = text.match(/@kb\s*(.*)/i);
+  if (kbMatch) {
+    const query = kbMatch[1].trim() || text.replace(/@kb/gi, "").trim();
+    return JSON.stringify({
+      thought: `Searching the knowledge base for "${truncate(query || text, 60)}"...`,
+      tool: "search_knowledge_base",
+      input: query || text.replace(/@\S+/g, "").trim().slice(0, 80),
+    });
+  }
 
   if (/search|kb|knowledge|docs|article|look\s?up|customer|record|research/i.test(text)) {
     const tool = /customer|record/i.test(text)

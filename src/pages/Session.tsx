@@ -866,13 +866,27 @@ export default function Session() {
                         <span className="text-[10px] font-bold">{req.name}: {req.currentRole} → {req.requestedRole}</span>
                         <div className="flex gap-1">
                           <button
-                            onClick={() => void decideRoleChangeMut({ requestId: req._id as never, decision: "approved" })}
+                            onClick={async () => {
+                              try {
+                                await decideRoleChangeMut({ requestId: req._id as never, decision: "approved" });
+                                toast.success(`Approved ${req.name}'s role change`);
+                              } catch (err) {
+                                toast.error(err instanceof Error ? err.message : "Failed");
+                              }
+                            }}
                             className="nb-border bg-[#2ECC71] px-1.5 py-0.5 text-[9px] font-bold text-black"
                           >
                             ✓
                           </button>
                           <button
-                            onClick={() => void decideRoleChangeMut({ requestId: req._id as never, decision: "denied" })}
+                            onClick={async () => {
+                              try {
+                                await decideRoleChangeMut({ requestId: req._id as never, decision: "denied" });
+                                toast.success(`Denied ${req.name}'s role change`);
+                              } catch (err) {
+                                toast.error(err instanceof Error ? err.message : "Failed");
+                              }
+                            }}
                             className="nb-border bg-[#FF5C5C] px-1.5 py-0.5 text-[9px] font-bold text-white"
                           >
                             ✗
@@ -1142,12 +1156,17 @@ export default function Session() {
                 {(["driver", "copilot", "observer"] as const).filter((r) => r !== myRole).map((targetRole) => (
                   <button
                     key={targetRole}
-                    onClick={() =>
-                      void requestRoleChangeMut({
-                        sessionId: session._id as never,
-                        requestedRole: targetRole,
-                      })
-                    }
+                    onClick={async () => {
+                      try {
+                        await requestRoleChangeMut({
+                          sessionId: session._id as never,
+                          requestedRole: targetRole,
+                        });
+                        toast.success(`Requested role change to ${targetRole}`);
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : "Failed to request role change");
+                      }
+                    }}
                     className="nb-border nb-lift flex-1 bg-card px-1.5 py-1 text-[9px] font-bold hover:bg-secondary"
                   >
                     → {targetRole}
@@ -1177,13 +1196,27 @@ export default function Session() {
                   <span className="text-[10px] font-bold">{req.name}: {req.currentRole} → {req.requestedRole}</span>
                   <div className="flex gap-1">
                     <button
-                      onClick={() => void decideRoleChangeMut({ requestId: req._id as never, decision: "approved" })}
+                      onClick={async () => {
+                        try {
+                          await decideRoleChangeMut({ requestId: req._id as never, decision: "approved" });
+                          toast.success(`Approved ${req.name}'s role change`);
+                        } catch (err) {
+                          toast.error(err instanceof Error ? err.message : "Failed");
+                        }
+                      }}
                       className="nb-border bg-[#2ECC71] px-1.5 py-0.5 text-[9px] font-bold text-black"
                     >
                       ✓
                     </button>
                     <button
-                      onClick={() => void decideRoleChangeMut({ requestId: req._id as never, decision: "denied" })}
+                      onClick={async () => {
+                        try {
+                          await decideRoleChangeMut({ requestId: req._id as never, decision: "denied" });
+                          toast.success(`Denied ${req.name}'s role change`);
+                        } catch (err) {
+                          toast.error(err instanceof Error ? err.message : "Failed");
+                        }
+                      }}
                       className="nb-border bg-[#FF5C5C] px-1.5 py-0.5 text-[9px] font-bold text-white"
                     >
                       ✗
