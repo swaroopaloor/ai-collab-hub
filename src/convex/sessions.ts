@@ -83,6 +83,11 @@ export const listSessions = query({
           .first();
         isMember = !!me;
       }
+      let myRole: string | null = null;
+      if (userId && isMember) {
+        const me = participants.find((p) => p.userId === userId);
+        myRole = me?.role ?? null;
+      }
       result.push({
         _id: s._id,
         title: s.title,
@@ -90,8 +95,10 @@ export const listSessions = query({
         state: s.state,
         joinCode: s.joinCode,
         createdAt: s.createdAt,
+        createdBy: s.createdBy,
         participantCount: participants.length,
         isMember,
+        myRole,
       });
     }
     return result;

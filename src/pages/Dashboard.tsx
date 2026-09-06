@@ -39,8 +39,10 @@ type SessionRow = {
   state: "running" | "paused" | "awaiting_input" | "done";
   joinCode: string;
   createdAt: number;
+  createdBy: string;
   participantCount: number;
   isMember: boolean;
+  myRole: string | null;
 };
 
 export const STATE_STYLES: Record<
@@ -336,35 +338,37 @@ export default function Dashboard() {
                     <Copy className="size-3.5" />
                   )}
                 </Button>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="nb-border nb-lift h-8 bg-card px-2.5 text-[#FF5C5C] hover:text-[#FF5C5C]"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent className="nb-border">
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete session?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will permanently delete <span className="font-bold text-foreground">{s.title}</span> and all its data including messages, events, and participant history. This cannot be undone.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel className="nb-border bg-card">Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={() => void handleDelete(s._id)}
-                        className="nb-border bg-[#FF5C5C] text-white hover:bg-[#FF5C5C]/90"
+                {(s.createdBy === user?._id || s.myRole === "driver") && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="nb-border nb-lift h-8 bg-card px-2.5 text-[#FF5C5C] hover:text-[#FF5C5C]"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        Delete
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="nb-border">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete session?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will permanently delete <span className="font-bold text-foreground">{s.title}</span> and all its data including messages, events, and participant history. This cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel className="nb-border bg-card">Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => void handleDelete(s._id)}
+                          className="nb-border bg-[#FF5C5C] text-white hover:bg-[#FF5C5C]/90"
+                        >
+                          Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
               </div>
             </div>
           ))}
