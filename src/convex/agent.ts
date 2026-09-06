@@ -166,13 +166,18 @@ To call a tool, output ONLY a JSON object (nothing else):
 For save_memory, input format: tags=tag1,tag2|<memory content>
 
 HOW TO REPLY TO HUMANS:
-Just write your message as plain text. Do NOT wrap it in JSON. Do NOT use code fences. Just write naturally, like you're chatting with a coworker.
+Just write your message as plain text. Do NOT wrap it in JSON. Do NOT use code fences. Do NOT output JSON objects of any kind. Just write naturally, like you're chatting with a coworker. The system will automatically detect your text response — you do not need to wrap it in any protocol.
 
 Example of a GOOD reply:
 Hey Sarah! I looked into the billing issue for Acme Corp. They're on the Team annual plan since November 2024 and have had two escalations in the past year. I'd recommend treating this as high priority given their history.
 
-Example of a BAD reply (never do this):
+Example of a BAD reply (never do this — will not work):
 {"reply": "Hey Sarah! I looked into the billing issue..."}
+
+IMPORTANT: When you want to reply to the humans, simply output your message as raw text. For example:
+"I've searched the knowledge base and found the following information about the refund policy..."
+
+Do not use any JSON, code blocks, or special formatting. Just natural language.
 
 PROPOSALS:
 When you want to propose a change that needs human review, output ONLY:
@@ -242,9 +247,7 @@ async function callLlm(
         model: backend.model,
         messages,
         temperature: 0.4,
-        max_tokens: 700,
-        // Force strict JSON so the model never drifts into prose or leaks
-        // partial JSON into the thread.
+        max_tokens: 800,
         ...(withJsonMode ? { response_format: { type: "json_object" } } : {}),
       }),
     });
@@ -395,6 +398,12 @@ async function askModel(
 /** Aggressively extract human-readable text from model output.
  *  The model should write plain text, but if it accidentally returns JSON,
  *  we dig out the reply and discard the protocol wrapper. */
+/** Extract human-readable text from model output.
+ *  Handles three cases:
+ *  1. Plain text → return as-is
+ *  2. JSON with a reply key → extract the reply value
+ *  3. JSON without a clear reply → salvage nested text or return null
+ */
 function salvageReply(text: string): string | null {
   const cleaned = text
     .trim()
@@ -406,14 +415,16 @@ function salvageReply(text: string): string | null {
   // Try to parse as JSON — if it fails, it's already plain prose.
   try {
     const parsed = JSON.parse(cleaned) as unknown;
-    if (typeof parsed === "string") return parsed.trim();
+    if (typeof parsed === "string" && parsed.trim()) return parsed.trim();
     if (parsed && typeof parsed === "object") {
       const obj = parsed as Record<string, unknown>;
-      // Extract from known reply keys.
-      for (const key of ["reply", "message", "content", "text", "response", "answer"]) {
+      // Check for a direct string reply first.
+      for (const key of ["reply", "message", "content", "text", "response", "answer", "thought"]) {
         const val = obj[key];
         if (typeof val === "string" && val.trim()) return val.trim();
       }
+      // If the entire object is just {reply: "..."} — return the reply.
+      if (obj.reply && typeof obj.reply === "string") return (obj.reply as string).trim();
       // Nested object (e.g. {"reply": {"text": ...}}).
       for (const key of ["reply", "message"]) {
         const val = obj[key];
@@ -423,6 +434,11 @@ function salvageReply(text: string): string | null {
             if (typeof nested[k] === "string" && nested[k]) return (nested[k] as string).trim();
           }
         }
+      }
+      // Composite object — try to stringify it readably.
+      if (Object.keys(obj).length > 0) {
+        // If it has a thought key, that's usually human-readable.
+        if (typeof obj.thought === "string" && obj.thought.trim()) return obj.thought.trim();
       }
       // Give up on JSON — don't return the raw object.
       return null;
@@ -728,9 +744,17 @@ export const runTurn = internalAction({
         }
 
         // If parsed has no tool/proposal, treat as a reply attempt.
-        if (typeof parsed.reply === "string" && parsed.reply.trim()) {
-          // Model wrapped reply in JSON despite instructions — extract it.
-          const replyText = salvageReply(JSON.stringify({ reply: parsed.reply })) ?? parsed.reply;
+        // The model may have returned a JSON object without a clean reply key,
+        // or it may have returned {reply: ...} wrapped in JSON.
+        const replyText: string | null =
+          typeof parsed.reply === "string" && parsed.reply.trim()
+            ? parsed.reply
+            : parsed.reply && typeof parsed.reply === "object"
+              ? salvageReply(JSON.stringify(parsed.reply)) ?? null
+              : null;
+
+        if (replyText) {
+          // Clean reply extracted from JSON.
           await ctx.runMutation(internal.sessions.internalAppendEvent, {
             sessionId,
             type: "agent_message",
@@ -740,17 +764,19 @@ export const runTurn = internalAction({
             promptedBy: attribution,
           });
         } else {
-          // Unknown JSON structure — salvage what we can.
-          const replyText = salvageReply(text) ?? "Sorry — I hit a snag formatting my response. @mention me again and I'll try again.";
+          // Fall back: salvage whatever the model actually wrote.
+          const salvaged = salvageReply(text);
           await ctx.runMutation(internal.sessions.internalAppendEvent, {
             sessionId,
             type: "agent_message",
             authorType: "agent",
             authorName: AGENT_NAME,
-            content: replyText.slice(0, 2000),
+            content: (salvaged ?? "Sorry — I hit a snag formatting my response. @mention me again and I'll try again.").slice(0, 2000),
             promptedBy: attribution,
           });
         }
+
+        // Push the model's raw JSON to conversation history for continuity.
         conversation.push({ role: "assistant", content: JSON.stringify(parsed) });
 
         // Did a human interrupt us while we were generating? If so, keep going.
