@@ -1341,6 +1341,32 @@ export default function Session() {
   );
 }
 
+/** Strip JSON protocol residue from agent messages that leaked into the thread.
+ *  This is a last-resort safety net — the backend should handle this, but
+ *  if raw JSON still appears in a message, we extract the human-readable text. */
+function cleanAgentContent(content: string): string {
+  const trimmed = content.trim();
+  // If it doesn't look like JSON, return as-is.
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("```")) return content;
+  // Try to strip code fences.
+  const stripped = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  try {
+    const parsed = JSON.parse(stripped) as unknown;
+    if (typeof parsed === "string") return parsed;
+    if (parsed && typeof parsed === "object") {
+      const obj = parsed as Record<string, unknown>;
+      // Extract from known reply keys.
+      for (const key of ["reply", "message", "content", "text", "response"]) {
+        const val = obj[key];
+        if (typeof val === "string" && val.trim()) return val.trim();
+      }
+    }
+  } catch {
+    // Not JSON — good, return as-is.
+  }
+  return content;
+}
+
 export function EventRow({ ev }: { ev: EventData }) {
   switch (ev.type) {
     case "message":
@@ -1366,7 +1392,7 @@ export function EventRow({ ev }: { ev: EventData }) {
             ) : null}
           </p>
           <div className="nb-border nb-shadow-sm w-fit bg-primary/90 px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap">
-            {ev.content}
+            {cleanAgentContent(ev.content)}
           </div>
         </div>
       );

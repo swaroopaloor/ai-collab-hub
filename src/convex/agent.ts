@@ -140,22 +140,34 @@ const TOOL_SPECS = [
 
 const SYSTEM_PROMPT = `You are an AI teammate collaborating inside a shared multiplayer session. Multiple humans are watching you work live in one chat thread.
 
-Rules:
-- You may call tools before answering. Available tools:
-${TOOL_SPECS.map((t) => `- ${t.name}: ${t.description} Example args: ${t.example}`).join("\n")}
+IMPORTANT: Write ALL your replies as plain conversational text — like a helpful human colleague would write in a team chat. Be warm, direct, and specific. Use natural language, not formal or robotic phrasing. Address people by name when responding to them.
 
-- To call a tool, reply with ONLY a JSON object:
-  {"thought": "<one short sentence shown to everyone>", "tool": "<tool name>", "input": "<tool input>"}
-- For save_memory, input format: tags=tag1,tag2|<memory content>
-- When you have enough context, reply with ONLY a JSON object:
-  {"reply": "<your message to the thread. Be concise and helpful. Address humans by name when responding to them.>"}
-- When you want to propose a change that needs human review (a diff, edit, resolution, or assumption), reply with ONLY:
-  {"proposal": {"title": "<short title>", "artifactType": "<code|text|structured>", "before": "<current state>", "after": "<proposed new state>"}}
-  The system will pause and show a review gate to the team. You will be resumed after they decide.
-- If the conversation contains an [INTERRUPTION] marker, acknowledge the redirect and fold it into your current work — do not lose the original task.
-- If the conversation contains [TEAM_MEMORY] entries, cite them when relevant: mention the source session and fact.
-- Inside the "reply" value, write plain conversational text for humans. Never put JSON, code fences, or protocol syntax inside the reply value itself.
-- Never output anything except a single JSON object.`;
+You have access to tools:
+${TOOL_SPECS.map((t) => `- ${t.name}: ${t.description}`).join("\n")}
+
+HOW TO USE TOOLS:
+To call a tool, output ONLY a JSON object (nothing else):
+{"thought": "<short sentence shown to everyone>", "tool": "<tool name>", "input": "<tool input>"}
+For save_memory, input format: tags=tag1,tag2|<memory content>
+
+HOW TO REPLY TO HUMANS:
+Just write your message as plain text. Do NOT wrap it in JSON. Do NOT use code fences. Just write naturally, like you're chatting with a coworker.
+
+Example of a GOOD reply:
+Hey Sarah! I looked into the billing issue for Acme Corp. They're on the Team annual plan since November 2024 and have had two escalations in the past year. I'd recommend treating this as high priority given their history.
+
+Example of a BAD reply (never do this):
+{"reply": "Hey Sarah! I looked into the billing issue..."}
+
+PROPOSALS:
+When you want to propose a change that needs human review, output ONLY:
+{"proposal": {"title": "<short title>", "artifactType": "<code|text|structured>", "before": "<current state>", "after": "<proposed new state>"}}
+
+RULES:
+- If the conversation contains an [INTERRUPTION] marker, acknowledge it and fold it into your current work.
+- If the conversation contains [TEAM_MEMORY] entries, cite them when relevant.
+- Never output JSON when responding to humans. JSON is ONLY for tool calls and proposals.
+- Be concise and helpful. No filler, no fluff.`;
 
 interface AgentEvent {
   type: string;
@@ -354,43 +366,73 @@ async function askModel(
  * our JSON protocol. Strips code fences, pulls text out of wrapper objects,
  * and falls back to the raw text only if nothing structured survives.
  */
+/** Aggressively extract human-readable text from model output.
+ *  The model should write plain text, but if it accidentally returns JSON,
+ *  we dig out the reply and discard the protocol wrapper. */
 function salvageReply(text: string): string | null {
-  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  if (!trimmed) return null;
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+  if (!cleaned) return null;
 
+  // Try to parse as JSON — if it fails, it's already plain prose.
   try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    if (typeof parsed === "string") return parsed;
+    const parsed = JSON.parse(cleaned) as unknown;
+    if (typeof parsed === "string") return parsed.trim();
     if (parsed && typeof parsed === "object") {
       const obj = parsed as Record<string, unknown>;
+      // Extract from known reply keys.
       for (const key of ["reply", "message", "content", "text", "response", "answer"]) {
-        const v = obj[key];
-        if (typeof v === "string" && v.trim()) return v.trim();
+        const val = obj[key];
+        if (typeof val === "string" && val.trim()) return val.trim();
       }
-      // Last resort: stringify the object pretty-printed (better than raw).
-      return JSON.stringify(obj, null, 2);
+      // Nested object (e.g. {"reply": {"text": ...}}).
+      for (const key of ["reply", "message"]) {
+        const val = obj[key];
+        if (val && typeof val === "object") {
+          const nested = val as Record<string, unknown>;
+          for (const k of ["text", "content", "message"]) {
+            if (typeof nested[k] === "string" && nested[k]) return (nested[k] as string).trim();
+          }
+        }
+      }
+      // Give up on JSON — don't return the raw object.
+      return null;
     }
   } catch {
-    // Not JSON — treat as plain prose below.
+    // Not JSON — clean up any stray backticks or protocol remnants.
   }
 
-  // Prose is fine as-is: it looks like a normal chat message.
-  return trimmed;
+  // Remove any JSON-looking wrapper if present: {"reply": "..."}
+  const jsonWrapper = cleaned.match(/\{"(?:reply|message|content|text|response)":\s*"([\s\S]*?)"\}/);
+  if (jsonWrapper) return jsonWrapper[1];
+
+  // Strip leading/trailing protocol syntax.
+  const stripped = cleaned
+    .replace(/^(?:Thought|Thought:|Tool|Reply|Response):\s*/i, "")
+    .replace(/^\{"(?:thought|tool|input|reply|proposal)"[\s\S]*$/m, "")
+    .trim();
+
+  return stripped || null;
 }
 
+/** Detect if the model output is a tool-call JSON object.
+ *  Returns the parsed object if it looks like a valid tool call or proposal,
+ *  otherwise null (meaning the output is plain prose — a reply to the thread). */
 function parseModelJson(text: string): Record<string, unknown> | null {
-  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  if (!cleaned.startsWith("{")) return null;
   try {
-    return JSON.parse(cleaned) as Record<string, unknown>;
-  } catch {
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) {
-      try {
-        return JSON.parse(match[0]) as Record<string, unknown>;
-      } catch {
-        return null;
-      }
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    // Only treat as protocol JSON if it has tool/proposal structure.
+    if (typeof parsed === "object" && parsed !== null && ("tool" in parsed || "proposal" in parsed)) {
+      return parsed;
     }
+    // A plain {"reply": ...} wrapper — extract the reply text instead.
+    return null;
+  } catch {
     return null;
   }
 }
@@ -493,18 +535,49 @@ export const runTurn = internalAction({
 
         const parsed = parseModelJson(text);
         if (!parsed) {
-          // Model didn't follow the JSON protocol — salvage a human-readable
-          // reply instead of dumping raw JSON into the chat thread.
-          const salvaged = salvageReply(text) ?? "Sorry — I hit a snag formatting my response. @mention me again and I'll try again.";
+          // Model wrote plain conversational text — this is the expected
+          // path for normal replies. Post it directly.
+          const replyText = salvageReply(text) ?? text.trim();
+          if (!replyText) {
+            await ctx.runMutation(internal.sessions.internalAppendEvent, {
+              sessionId,
+              type: "system",
+              authorType: "system",
+              authorName: "System",
+              content: `Agent returned an empty response.`,
+            });
+            break;
+          }
           await ctx.runMutation(internal.sessions.internalAppendEvent, {
             sessionId,
             type: "agent_message",
             authorType: "agent",
             authorName: AGENT_NAME,
-            content: salvaged.slice(0, 2000),
+            content: replyText.slice(0, 2000),
             promptedBy: attribution,
           });
-          break;
+          // Check for interruptions before finishing.
+          const freshEvents = (await ctx.runQuery(api.events.listEvents, {
+            sessionId,
+          })) as AgentEvent[];
+          const newPending = freshEvents.filter(
+            (e) =>
+              e.seq > (events[events.length - 1]?.seq ?? 0) &&
+              e.authorType === "human" &&
+              e.type === "message",
+          );
+          if (newPending.length > 0) {
+            await ctx.runMutation(internal.sessions.internalSetActivity, {
+              sessionId,
+              label: `${AGENT_NAME} noticed an interruption...`,
+            });
+            continue;
+          }
+          await ctx.runMutation(internal.sessions.internalSetActivity, {
+            sessionId,
+            state: "awaiting_input",
+          });
+          return;
         }
 
         if (typeof parsed.tool === "string") {
@@ -628,37 +701,31 @@ export const runTurn = internalAction({
           return;
         }
 
-        // Final reply.
-        const replyValue = typeof parsed.reply === "string" && parsed.reply.trim()
-          ? parsed.reply
-          : typeof parsed.content === "string" && parsed.content.trim()
-            ? parsed.content
-            : null;
-        // Handle nested objects like {"reply": {"text": "..."}} gracefully.
-        let reply: string;
-        if (replyValue) {
-          reply = replyValue;
-        } else if (parsed.reply && typeof parsed.reply === "object") {
-          const nested = parsed.reply as Record<string, unknown>;
-          reply =
-            (typeof nested.text === "string" && nested.text) ||
-            (typeof nested.content === "string" && nested.content) ||
-            (typeof nested.message === "string" && nested.message) ||
-            salvageReply(JSON.stringify(nested)) ||
-            "Sorry — I hit a snag formatting my response. @mention me again and I'll try again.";
+        // If parsed has no tool/proposal, treat as a reply attempt.
+        if (typeof parsed.reply === "string" && parsed.reply.trim()) {
+          // Model wrapped reply in JSON despite instructions — extract it.
+          const replyText = salvageReply(JSON.stringify({ reply: parsed.reply })) ?? parsed.reply;
+          await ctx.runMutation(internal.sessions.internalAppendEvent, {
+            sessionId,
+            type: "agent_message",
+            authorType: "agent",
+            authorName: AGENT_NAME,
+            content: replyText.slice(0, 2000),
+            promptedBy: attribution,
+          });
         } else {
-          reply = salvageReply(text) ?? "Sorry — I hit a snag formatting my response. @mention me again and I'll try again.";
+          // Unknown JSON structure — salvage what we can.
+          const replyText = salvageReply(text) ?? "Sorry — I hit a snag formatting my response. @mention me again and I'll try again.";
+          await ctx.runMutation(internal.sessions.internalAppendEvent, {
+            sessionId,
+            type: "agent_message",
+            authorType: "agent",
+            authorName: AGENT_NAME,
+            content: replyText.slice(0, 2000),
+            promptedBy: attribution,
+          });
         }
         conversation.push({ role: "assistant", content: JSON.stringify(parsed) });
-
-        await ctx.runMutation(internal.sessions.internalAppendEvent, {
-          sessionId,
-          type: "agent_message",
-          authorType: "agent",
-          authorName: AGENT_NAME,
-          content: reply,
-          promptedBy: attribution,
-        });
 
         // Did a human interrupt us while we were generating? If so, keep going.
         const freshEvents = (await ctx.runQuery(api.events.listEvents, {
