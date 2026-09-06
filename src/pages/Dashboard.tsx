@@ -15,7 +15,19 @@ import {
   Brain,
   Hash,
   Radio,
+  Trash2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery } from "convex/react";
@@ -76,6 +88,7 @@ export default function Dashboard() {
     | SessionRow[]
     | undefined;
   const createSession = useMutation(api.sessions.createSession);
+  const deleteSession = useMutation(api.sessions.deleteSession);
   const seedDemo = useMutation(api.seed.seedDemoData);
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
@@ -116,6 +129,15 @@ export default function Dashboard() {
     setCopied(session._id);
     toast.success("Join link copied");
     setTimeout(() => setCopied(null), 1500);
+  };
+
+  const handleDelete = async (sessionId: string) => {
+    try {
+      await deleteSession({ sessionId: sessionId as never });
+      toast.success("Session deleted");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete");
+    }
   };
 
   const handleSignOut = async () => {
@@ -314,6 +336,35 @@ export default function Dashboard() {
                     <Copy className="size-3.5" />
                   )}
                 </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="nb-border nb-lift h-8 bg-card px-2.5 text-[#FF5C5C] hover:text-[#FF5C5C]"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent className="nb-border">
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete session?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently delete <span className="font-bold text-foreground">{s.title}</span> and all its data including messages, events, and participant history. This cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel className="nb-border bg-card">Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => void handleDelete(s._id)}
+                        className="nb-border bg-[#FF5C5C] text-white hover:bg-[#FF5C5C]/90"
+                      >
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </div>
           ))}

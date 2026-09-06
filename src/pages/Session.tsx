@@ -42,10 +42,22 @@ import {
   ShieldOff,
   Sparkles,
   Square,
+  Trash2,
   Wrench,
   Zap,
   CheckCircle,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery } from "convex/react";
@@ -313,6 +325,7 @@ export default function Session() {
   const requestRoleChangeMut = useMutation(api.sessions.requestRoleChange);
   const decideRoleChangeMut = useMutation(api.sessions.decideRoleChange);
   const driverSetParticipantRoleMut = useMutation(api.sessions.driverSetParticipantRole);
+  const deleteSessionMut = useMutation(api.sessions.deleteSession);
 
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -516,6 +529,16 @@ export default function Session() {
     setTimeout(() => setCopiedLink(false), 1500);
   };
 
+  const handleDeleteSession = async () => {
+    try {
+      await deleteSessionMut({ sessionId: sessionId as never });
+      toast.success("Session deleted");
+      navigate("/dashboard");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete");
+    }
+  };
+
   if (session === undefined || myPart === undefined) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -681,6 +704,43 @@ export default function Session() {
                 participants={session.participants}
               />
             </div>
+          )}
+          {myRole === "driver" && (
+            <AlertDialog>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="nb-border size-8 bg-card px-0 text-[#FF5C5C] hover:text-[#FF5C5C]"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </AlertDialogTrigger>
+                </TooltipTrigger>
+                <TooltipContent className="nb-border bg-card text-card-foreground">
+                  <p className="text-[11px]">Delete this session permanently</p>
+                </TooltipContent>
+              </Tooltip>
+              <AlertDialogContent className="nb-border">
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this session?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete <span className="font-bold text-foreground">{session.title}</span> and all its data — messages, events, participants, time travel history, and approval gates. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="nb-border bg-card">Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => void handleDeleteSession()}
+                    className="nb-border bg-[#FF5C5C] text-white hover:bg-[#FF5C5C]/90"
+                  >
+                    Delete session
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
           <Sheet open={mobileSidebar} onOpenChange={setMobileSidebar}>
             <SheetTrigger asChild>

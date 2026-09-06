@@ -1000,6 +1000,77 @@ export const getAwayBriefing = query({
   },
 });
 
+/** Delete a session and all its related data. Only the driver (or creator) can do this. */
+export const deleteSession = mutation({
+  args: {
+    sessionId: v.id("sessions"),
+  },
+  handler: async (ctx, { sessionId }) => {
+    const userId = await requireUserId(ctx);
+    const session = await ctx.db.get(sessionId);
+    if (!session) throw new Error("Session not found");
+
+    // Only the driver or creator can delete.
+    const me = await ctx.db
+      .query("participants")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", sessionId).eq("userId", userId),
+      )
+      .first();
+    const isDriver = me?.role === "driver";
+    const isCreator = session.createdBy === userId;
+    if (!isDriver && !isCreator)
+      throw new Error("Only the driver can delete a session");
+
+    // Delete participants.
+    const parts = await ctx.db
+      .query("participants")
+      .withIndex("by_session", (q) => q.eq("sessionId", sessionId))
+      .collect();
+    for (const p of parts) await ctx.db.delete(p._id);
+
+    // Delete events.
+    const evts = await ctx.db
+      .query("events")
+      .withIndex("by_session_seq", (q) => q.eq("sessionId", sessionId))
+      .collect();
+    for (const e of evts) await ctx.db.delete(e._id);
+
+    // Delete join requests.
+    const joinReqs = await ctx.db
+      .query("joinRequests")
+      .withIndex("by_session", (q) => q.eq("sessionId", sessionId))
+      .collect();
+    for (const r of joinReqs) await ctx.db.delete(r._id);
+
+    // Delete role change requests.
+    const roleReqs = await ctx.db
+      .query("roleChangeRequests")
+      .withIndex("by_session", (q) => q.eq("sessionId", sessionId))
+      .collect();
+    for (const r of roleReqs) await ctx.db.delete(r._id);
+
+    // Delete presence entries.
+    const presences = await ctx.db
+      .query("presence")
+      .withIndex("by_session", (q) => q.eq("sessionId", sessionId))
+      .collect();
+    for (const p of presences) await ctx.db.delete(p._id);
+
+    // Delete approval gates.
+    const gates = await ctx.db
+      .query("approvalGates")
+      .withIndex("by_session", (q) => q.eq("sessionId", sessionId))
+      .collect();
+    for (const g of gates) await ctx.db.delete(g._id);
+
+    // Delete the session itself.
+    await ctx.db.delete(sessionId);
+
+    return { success: true };
+  },
+});
+
 export const internalAppendEvent = internalMutation({
   args: {
     sessionId: v.id("sessions"),
