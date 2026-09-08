@@ -154,38 +154,41 @@ const TOOL_SPECS = [
 
 const SYSTEM_PROMPT = `You are an AI teammate collaborating inside a shared multiplayer session. Multiple humans are watching you work live in one chat thread.
 
-IMPORTANT: Write ALL your replies as plain conversational text — like a helpful human colleague would write in a team chat. Be warm, direct, and specific. Use natural language, not formal or robotic phrasing. Address people by name when responding to them.
+CRITICAL RULE: Write ALL your replies as natural conversational text. NEVER output JSON objects, code fences, or any structured format when responding to humans. Write like a knowledgeable friend chatting in a group chat — warm, specific, and helpful.
 
 You have access to tools:
 ${TOOL_SPECS.map((t) => `- ${t.name}: ${t.description}`).join("\n")}
 
 SPECIAL TRIGGERS:
-- When a user includes @kb in their message, they are asking you to search the knowledge base. ALWAYS call the search_knowledge_base tool with the rest of their message as the query. For example: "@kb what is the refund policy" → call search_knowledge_base("refund policy")
-- When a user includes @agent or @ai in their message, they are directly addressing you. Always respond to these.
+- @kb → ALWAYS call search_knowledge_base tool. The user wants to search the knowledge base.
+- @agent / @ai → You are being addressed directly. Always respond.
 
-HOW TO USE TOOLS:
-To call a tool, output ONLY a JSON object (nothing else):
-{"thought": "<short sentence shown to everyone>", "tool": "<tool name>", "input": "<tool input>"}
-For save_memory, input format: tags=tag1,tag2|<memory content>
+USING TOOLS:
+To call a tool, output ONLY this exact JSON (nothing else before or after):
+{"thought": "<one-line summary>", "tool": "<tool_name>", "input": "<query>"}
 
-HOW TO REPLY TO HUMANS:
-Just write your message as plain text. Do NOT wrap it in JSON. Do NOT use code fences. Just write naturally, like you're chatting with a coworker.
+REPLYING TO HUMANS:
+Just write your message. No JSON. No code fences. No wrappers. Just natural language.
 
-Example of a GOOD reply:
-Hey Sarah! I looked into the billing issue for Acme Corp. They're on the Team annual plan since November 2024 and have had two escalations in the past year. I'd recommend treating this as high priority given their history.
+GOOD: Hey! I checked the KB and found that refunds are processed within 5 business days. The policy requires the original receipt — I can help you look that up if needed.
 
-Example of a BAD reply (never do this):
-{"reply": "Hey Sarah! I looked into the billing issue..."}
+BAD (NEVER DO THIS):
+{"reply": "Hey! I checked the KB..."}
+{"message": "Hey! I checked the KB..."}
+\`\`\`
+Hey! I checked the KB...
+\`\`\`
 
-PROPOSALS:
-When you want to propose a change that needs human review, output ONLY:
-{"proposal": {"title": "<short title>", "artifactType": "<code|text|structured>", "before": "<current state>", "after": "<proposed new state>"}}
+If you searched the knowledge base, summarize the results in your own words. Don't just say "check the KB" — actually tell the user what you found. Be specific and helpful.
+
+PROPOSALS (only when needed):
+{"proposal": {"title": "...", "artifactType": "code|text|structured", "before": "...", "after": "..."}}
 
 RULES:
-- If the conversation contains an [INTERRUPTION] marker, acknowledge it and fold it into your current work.
-- If the conversation contains [TEAM_MEMORY] entries, cite them when relevant.
-- Never output JSON when responding to humans. JSON is ONLY for tool calls and proposals.
-- Be concise and helpful. No filler, no fluff.`;
+- Acknowledge [INTERRUPTION] markers and fold them into your work.
+- Cite [TEAM_MEMORY] entries when relevant.
+- NEVER output JSON when talking to humans.
+- Be concise and specific. No filler. No fluff.`;
 
 interface AgentEvent {
   type: string;
@@ -226,7 +229,7 @@ function renderThread(events: AgentEvent[]): string {
 
 async function callLlm(
   messages: ChatMessage[],
-  opts: { jsonMode?: boolean; modelOverride?: string } = {},
+  opts: { modelOverride?: string } = {},
 ): Promise<{ ok: boolean; text: string }> {
   const backend = resolveModel();
   if (!backend) {
@@ -240,8 +243,7 @@ async function callLlm(
       ? "groq"
       : "llm";
 
-  const attempt = (withJsonMode: boolean) =>
-    fetch(`${backend.baseUrl}/chat/completions`, {
+  fetch(`${backend.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -251,19 +253,24 @@ async function callLlm(
         model: backend.model,
         messages,
         temperature: 0.4,
-        max_tokens: 700,
-        // Force strict JSON so the model never drifts into prose or leaks
-        // partial JSON into the thread.
-        ...(withJsonMode ? { response_format: { type: "json_object" } } : {}),
+        max_tokens: 1500,
       }),
     });
 
   try {
-    let res = await attempt(!!opts.jsonMode);
-    // Some endpoints/models reject response_format — retry once without it.
-    if (!res.ok && res.status === 400 && opts.jsonMode) {
-      res = await attempt(false);
-    }
+    const res = await fetch(`${backend.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${backend.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: backend.model,
+        messages,
+        temperature: 0.4,
+        max_tokens: 1500,
+      }),
+    });
     if (!res.ok) {
       console.warn(`[${label}] HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
       return { ok: false, text: `${label} HTTP ${res.status}` };
@@ -390,7 +397,7 @@ async function askModel(
 ): Promise<{ ok: boolean; text: string }> {
   const backend = resolveModel();
   if (backend) {
-    const live = await callLlm(conversation, { jsonMode: true, modelOverride });
+    const live = await callLlm(conversation, { modelOverride });
     if (live.ok) return live;
     console.warn("[agent] falling back to offline simulation:", live.text);
   }
@@ -406,50 +413,75 @@ async function askModel(
  *  The model should write plain text, but if it accidentally returns JSON,
  *  we dig out the reply and discard the protocol wrapper. */
 function salvageReply(text: string): string | null {
-  const cleaned = text
+  if (!text) return null;
+
+  // Step 1: Strip code fences.
+  let cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/, "")
     .trim();
   if (!cleaned) return null;
 
-  // Try to parse as JSON — if it fails, it's already plain prose.
-  try {
-    const parsed = JSON.parse(cleaned) as unknown;
-    if (typeof parsed === "string") return parsed.trim();
-    if (parsed && typeof parsed === "object") {
-      const obj = parsed as Record<string, unknown>;
-      // Extract from known reply keys.
-      for (const key of ["reply", "message", "content", "text", "response", "answer"]) {
-        const val = obj[key];
-        if (typeof val === "string" && val.trim()) return val.trim();
-      }
-      // Nested object (e.g. {"reply": {"text": ...}}).
-      for (const key of ["reply", "message"]) {
-        const val = obj[key];
-        if (val && typeof val === "object") {
-          const nested = val as Record<string, unknown>;
-          for (const k of ["text", "content", "message"]) {
-            if (typeof nested[k] === "string" && nested[k]) return (nested[k] as string).trim();
+  // Step 2: If it looks like JSON, try to extract human text.
+  if (cleaned.startsWith("{") || cleaned.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(cleaned) as unknown;
+      if (typeof parsed === "string") return parsed.trim();
+      if (parsed && typeof parsed === "object") {
+        const obj = parsed as Record<string, unknown>;
+        // Try all common reply keys.
+        for (const key of ["reply", "message", "content", "text", "response", "answer", "output", "result"]) {
+          const val = obj[key];
+          if (typeof val === "string" && val.trim()) return val.trim();
+        }
+        // Nested objects.
+        for (const key of ["reply", "message", "data"]) {
+          const val = obj[key];
+          if (val && typeof val === "object") {
+            const nested = val as Record<string, unknown>;
+            for (const k of ["text", "content", "message", "reply"]) {
+              if (typeof nested[k] === "string" && (nested[k] as string).trim()) return (nested[k] as string).trim();
+            }
           }
         }
+        // If it has a "thought" key but no reply, extract the thought.
+        if (typeof obj.thought === "string" && obj.thought.trim() && !obj.tool && !obj.proposal) {
+          return (obj.thought as string).trim();
+        }
+        // Give up on structured JSON — don't return the raw object.
+        return null;
       }
-      // Give up on JSON — don't return the raw object.
-      return null;
+    } catch {
+      // Not valid JSON — fall through to text extraction.
     }
-  } catch {
-    // Not JSON — clean up any stray backticks or protocol remnants.
   }
 
-  // Remove any JSON-looking wrapper if present: {"reply": "..."}
-  const jsonWrapper = cleaned.match(/\{"(?:reply|message|content|text|response)":\s*"([\s\S]*?)"\}/);
-  if (jsonWrapper) return jsonWrapper[1];
+  // Step 3: If it's a mixed block (JSON + prose), extract just the prose.
+  // Look for text after the last closing brace.
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (lastBrace >= 0 && lastBrace < cleaned.length - 1) {
+    const after = cleaned.slice(lastBrace + 1).trim();
+    if (after.length > 10) return after;
+  }
+  // Look for text before the first opening brace.
+  const firstBrace = cleaned.indexOf("{");
+  if (firstBrace > 0) {
+    const before = cleaned.slice(0, firstBrace).trim();
+    if (before.length > 10) return before;
+  }
 
-  // Strip leading/trailing protocol syntax.
+  // Step 4: Strip protocol prefixes and return whatever's left.
   const stripped = cleaned
-    .replace(/^(?:Thought|Thought:|Tool|Reply|Response):\s*/i, "")
-    .replace(/^\{"(?:thought|tool|input|reply|proposal)"[\s\S]*$/m, "")
+    .replace(/^(?:Thought|Thought:|Tool|Reply|Response|Answer):\s*/i, "")
     .trim();
+
+  // If it still looks like a partial JSON object, try to extract readable text.
+  if (stripped.startsWith("{") && !stripped.includes("}")) {
+    // Partial JSON — try to find any readable content.
+    const match = stripped.match(/"(?:reply|message|content|text|thought)":\s*"([^"]+)"/);
+    if (match) return match[1];
+  }
 
   return stripped || null;
 }

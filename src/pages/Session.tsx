@@ -1311,6 +1311,21 @@ export default function Session() {
               {visibleEvents.map((ev) => (
                 <EventRow key={`${ev._id}-${ev.seq}`} ev={ev} />
               ))}
+              {/* Typing indicator — shows when agent is actively working */}
+              {agentActive && !timeTraveling && (
+                <div className="max-w-[85%] self-end">
+                  <p className="mb-0.5 text-right text-[10px] font-black tracking-wide text-muted-foreground">
+                    <span className="rounded-none bg-primary px-1 py-px text-black">
+                      {AGENT_NAME.toUpperCase()}
+                    </span>
+                  </p>
+                  <div className="nb-border nb-shadow-sm flex w-fit items-center gap-1.5 bg-primary/90 px-4 py-2.5">
+                    <span className="inline-block size-1.5 animate-bounce rounded-full bg-black/60" style={{ animationDelay: "0ms" }} />
+                    <span className="inline-block size-1.5 animate-bounce rounded-full bg-black/60" style={{ animationDelay: "150ms" }} />
+                    <span className="inline-block size-1.5 animate-bounce rounded-full bg-black/60" style={{ animationDelay: "300ms" }} />
+                  </div>
+                </div>
+              )}
               {timeTraveling && (
                 <p className="self-center text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                   ↓ future events hidden · position {effectiveIndex + 1}/{maxIndex + 1}
@@ -1326,6 +1341,17 @@ export default function Session() {
             </div>
           )}          {/* Composer */}
           <div className="nb-border shrink-0 border-x-0 border-b-0 bg-card px-3 py-2 sm:px-6 sm:py-3">
+            {/* Agent working indicator bar */}
+            {agentActive && !timeTraveling && (
+              <div className="mx-auto mb-2 flex max-w-2xl items-center gap-2">
+                <div className="h-0.5 flex-1 overflow-hidden rounded-full bg-primary/20">
+                  <div className="h-full w-1/3 animate-[shimmer_1.5s_infinite] bg-primary" />
+                </div>
+                <span className="shrink-0 text-[10px] font-bold text-primary">
+                  {session.agentActivity ?? `${AGENT_NAME} is thinking...`}
+                </span>
+              </div>
+            )}
             <form
               className="mx-auto flex max-w-2xl gap-2"
               onSubmit={(e) => {
