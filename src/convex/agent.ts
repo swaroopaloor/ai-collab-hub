@@ -60,6 +60,60 @@ function resolveModel(): ModelBackend | null {
   return null;
 }
 
+// ---- Web search and URL fetch (real implementations) ----------------------
+
+async function webSearch(query: string): Promise<Array<{ title: string; url: string; snippet: string }>> {
+  const encoded = encodeURIComponent(query);
+  const res = await fetch(`https://html.duckduckgo.com/html/?q=${encoded}`, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (compatible; AI-Agent/1.0)",
+    },
+  });
+  if (!res.ok) throw new Error(`DuckDuckGo returned ${res.status}`);
+  const html = await res.text();
+
+  // Extract search results from DuckDuckGo HTML.
+  const results: Array<{ title: string; url: string; snippet: string }> = [];
+  const resultRegex = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>[\s\S]*?<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+  let match;
+  while ((match = resultRegex.exec(html)) !== null && results.length < 8) {
+    const url = match[1];
+    const title = match[2].replace(/<[^>]+>/g, "").trim();
+    const snippet = match[3].replace(/<[^>]+>/g, "").trim();
+    if (url && title) {
+      results.push({ title, url, snippet });
+    }
+  }
+  return results;
+}
+
+async function fetchUrlContent(url: string): Promise<string> {
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (compatible; AI-Agent/1.0)",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    },
+    redirect: "follow",
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const html = await res.text();
+
+  // Extract readable text from HTML.
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<nav[\s\S]*?<\/nav>/gi, "")
+    .replace(/<footer[\s\S]*?<\/footer>/gi, "")
+    .replace(/<header[\s\S]*?<\/header>/gi, "")
+    .replace(/<aside[\s\S]*?<\/aside>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Return first 8000 chars to avoid token overflow.
+  return text.length > 8000 ? text.slice(0, 8000) + "\n[content truncated]" : text;
+}
+
 // ---- Mock tools (stubs returning fake data) -------------------------------
 
 function runMockTool(name: string, input: string): string {
@@ -150,6 +204,18 @@ const TOOL_SPECS = [
       "Save a durable fact to Team Memory for future sessions. Use ONLY for information that is reusable across sessions: customer preferences, bug patterns, codebase conventions, key facts about a deal or project. Do NOT save ephemeral chat messages.",
     example: '{"tool":"save_memory","input":"tags=customer:acme-corp,topic:billing|Acme Corp prefers email over phone for billing disputes. They are on the Team annual plan since Nov 2024."}',
   },
+  {
+    name: "web_search",
+    description:
+      "Search the web for current information on any topic. Returns top results with titles, URLs, and snippets. Use this when you need real-time data, current events, company info, or anything not in your training data.",
+    example: '{"tool":"web_search","input":"YC Winter 2025 batch companies"}',
+  },
+  {
+    name: "fetch_url",
+    description:
+      "Fetch and extract text content from a URL. Use this when a user shares a link or when you need to read a specific webpage. Returns the readable text content.",
+    example: '{"tool":"fetch_url","input":"https://www.ycombinator.com/companies"}',
+  },
 ];
 
 const SYSTEM_PROMPT = `You are an AI teammate collaborating inside a shared multiplayer session. Multiple humans are watching you work live in one chat thread.
@@ -166,6 +232,8 @@ SPECIAL TRIGGERS:
 USING TOOLS:
 To call a tool, output ONLY this exact JSON (nothing else before or after):
 {"thought": "<one-line summary>", "tool": "<tool_name>", "input": "<query>"}
+
+IMPORTANT: You have web search and URL fetch tools. When someone asks you to research something, look up current data, or wants you to check a link — USE the web_search or fetch_url tool. Do NOT say you can't browse the web. You CAN search and fetch URLs using these tools.
 
 REPLYING TO HUMANS:
 Just write your message. No JSON. No code fences. No wrappers. Just natural language.
@@ -706,6 +774,22 @@ export const runTurn = internalAction({
             } catch {
               // KB table may not exist yet; fall back to mock
               result = runMockTool(toolName, input);
+            }
+          } else if (toolName === "web_search") {
+            // Real web search using DuckDuckGo
+            try {
+              const searchResults = await webSearch(input);
+              result = JSON.stringify({ results: searchResults }, null, 2);
+            } catch (err) {
+              result = JSON.stringify({ error: `Web search failed: ${err instanceof Error ? err.message : String(err)}` });
+            }
+          } else if (toolName === "fetch_url") {
+            // Fetch and extract text from a URL
+            try {
+              const content = await fetchUrlContent(input);
+              result = JSON.stringify({ content }, null, 2);
+            } catch (err) {
+              result = JSON.stringify({ error: `URL fetch failed: ${err instanceof Error ? err.message : String(err)}` });
             }
           } else {
             result = runMockTool(toolName, input);
