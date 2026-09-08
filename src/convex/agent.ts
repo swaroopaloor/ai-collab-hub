@@ -6,18 +6,24 @@ import { api, internal } from "./_generated/api";
 import { type Id } from "./_generated/dataModel";
 
 // ---- Model configuration -------------------------------------------------
-// Groq free tier (OpenAI-compatible). Set these env vars in the Keys / API
-// keys tab:
+// All LLM calls route through Experiential gateway (gpt-5.6-luna). Set this
+// env var in the Keys / API keys tab:
+//   EXPLABS_API_KEY  — bearer token from Settings -> API Keys
+//
+// Fallback (Groq free tier):
 //   GROQ_API_KEY  — bearer token from https://console.groq.com/keys
 //
-// Fallback env vars (any OpenAI-compatible endpoint):
-//   OX_ALPHA_API_KEY   — bearer token for the endpoint
+// Fallback (any OpenAI-compatible endpoint):
+//   OX_ALPHA_API_KEY   — bearer token
 //   OX_ALPHA_BASE_URL  — e.g. https://api.example.com/v1
 //   OX_ALPHA_MODEL     — optional model id override
 //
 // Until a key is set (or if the endpoint fails), the agent runs in offline
 // simulation mode: deterministic responses that still exercise the full tool
 // loop, interruption handling, attribution and summaries.
+
+const EXPLABS_BASE_URL = "https://api.experientiallabs.ai/v1";
+const EXPLABS_MODEL = "gpt-5.6-luna";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const GROQ_MODEL = "openai/gpt-oss-120b";
@@ -27,7 +33,15 @@ const AGENT_NAME = "AI";
 type ModelBackend = { baseUrl: string; apiKey: string; model: string };
 
 function resolveModel(): ModelBackend | null {
-  // Prefer Groq (free tier, ultra-fast)
+  // 1. Experiential gateway (gpt-5.6-luna)
+  if (process.env.EXPLABS_API_KEY) {
+    return {
+      baseUrl: EXPLABS_BASE_URL,
+      apiKey: process.env.EXPLABS_API_KEY,
+      model: process.env.OX_ALPHA_MODEL ?? EXPLABS_MODEL,
+    };
+  }
+  // 2. Groq free tier (ultra-fast)
   if (process.env.GROQ_API_KEY) {
     return {
       baseUrl: GROQ_BASE_URL,
@@ -35,7 +49,7 @@ function resolveModel(): ModelBackend | null {
       model: process.env.OX_ALPHA_MODEL ?? GROQ_MODEL,
     };
   }
-  // Fallback: any OpenAI-compatible endpoint
+  // 3. Fallback: any OpenAI-compatible endpoint
   if (process.env.OX_ALPHA_API_KEY && process.env.OX_ALPHA_BASE_URL) {
     return {
       baseUrl: process.env.OX_ALPHA_BASE_URL.replace(/\/+$/, ""),
@@ -218,7 +232,11 @@ async function callLlm(
   if (!backend) {
     return { ok: false, text: "No AI model configured." };
   }
-  const label = backend.baseUrl.includes("groq") ? "groq" : "llm";
+  const label = backend.baseUrl.includes("experiential")
+    ? "experiential"
+    : backend.baseUrl.includes("groq")
+      ? "groq"
+      : "llm";
 
   const attempt = (withJsonMode: boolean) =>
     fetch(`${backend.baseUrl}/chat/completions`, {
