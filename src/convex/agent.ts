@@ -201,6 +201,23 @@ function runMockTool(name: string, input: string): string {
         targetLanguage: "detected from input",
       }, null, 2);
     }
+    case "read_file": {
+      return JSON.stringify({
+        content: `[File content for ${input} would appear here. The agent needs to query the files table to read actual uploaded file content.]`,
+        fileName: input,
+      }, null, 2);
+    }
+    case "generate_file": {
+      const parts = input.split("|");
+      const fileName = parts[0] || "output.txt";
+      const fileContent = parts.slice(1).join("|") || "Generated content";
+      return JSON.stringify({
+        success: true,
+        fileName,
+        size: fileContent.length,
+        message: `File "${fileName}" has been created and is available for download.`,
+      }, null, 2);
+    }
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -266,6 +283,18 @@ const TOOL_SPECS = [
     description:
       "Translate text between languages. Takes text and target language, returns the translation.",
     example: '{"tool":"translate","input":"Spanish: Hello, how are you?"}',
+  },
+  {
+    name: "read_file",
+    description:
+      "Read the content of an uploaded file. Use when a user shares a file or mentions a file name. Returns the file content.",
+    example: '{"tool":"read_file","input":"report.md"}',
+  },
+  {
+    name: "generate_file",
+    description:
+      "Create a new file with content. Takes filename and content, creates a downloadable file. Use when the user asks you to create, write, or generate a file.",
+    example: '{"tool":"generate_file","input":"summary.md|# Summary\n\nThe key findings are..."}',
   },
 ];
 
@@ -862,6 +891,46 @@ export const runTurn = internalAction({
               result = JSON.stringify({ content }, null, 2);
             } catch (err) {
               result = JSON.stringify({ error: `URL fetch failed: ${err instanceof Error ? err.message : String(err)}` });
+            }
+          } else if (toolName === "read_file") {
+            // Read an uploaded file's content
+            try {
+              const files = (await ctx.runQuery(api.files.listSessionFiles, { sessionId })) as Array<{ name: string; content?: string; storageId: string }>;
+              const file = files.find((f) => f.name === input || f.name.includes(input));
+              if (file && file.content) {
+                result = JSON.stringify({ content: file.content, fileName: file.name }, null, 2);
+              } else if (file && file.storageId && file.storageId !== "generated") {
+                // For storage files, return metadata (actual download handled client-side)
+                result = JSON.stringify({ message: `File "${file.name}" found. It's stored in cloud storage. Use the download button to access it.`, fileName: file.name }, null, 2);
+              } else {
+                result = JSON.stringify({ error: `File "${input}" not found in this session. Available files: ${files.map((f) => f.name).join(", ") || "none"}` });
+              }
+            } catch (err) {
+              result = JSON.stringify({ error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` });
+            }
+          } else if (toolName === "generate_file") {
+            // Generate a new file
+            try {
+              const parts = input.split("|");
+              const fileName = (parts[0] || "output.txt").trim();
+              const fileContent = parts.slice(1).join("|").trim() || "Generated content";
+              const mimeType = fileName.endsWith(".md") ? "text/markdown"
+                : fileName.endsWith(".json") ? "application/json"
+                : fileName.endsWith(".csv") ? "text/csv"
+                : fileName.endsWith(".py") ? "text/x-python"
+                : fileName.endsWith(".js") ? "text/javascript"
+                : fileName.endsWith(".ts") ? "text/typescript"
+                : "text/plain";
+              await ctx.runMutation(api.files.saveGeneratedFile, {
+                sessionId,
+                name: fileName,
+                mimeType,
+                size: fileContent.length,
+                content: fileContent,
+              });
+              result = JSON.stringify({ success: true, fileName, size: fileContent.length, message: `File "${fileName}" created successfully. It's available for download in the session.` }, null, 2);
+            } catch (err) {
+              result = JSON.stringify({ error: `Failed to generate file: ${err instanceof Error ? err.message : String(err)}` });
             }
           } else {
             result = runMockTool(toolName, input);

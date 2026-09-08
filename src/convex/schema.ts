@@ -202,6 +202,22 @@ const schema = defineSchema(
     })
       .index("by_session", ["sessionId"])
       .index("by_session_tab", ["sessionId", "tabId"]),
+
+    // Files: uploaded or generated files in sessions
+    files: defineTable({
+      sessionId: v.id("sessions"),
+      name: v.string(), // e.g. "report.md"
+      mimeType: v.string(), // e.g. "text/markdown"
+      size: v.number(), // bytes
+      storageId: v.string(), // Convex storage id or "generated" for agent-created
+      content: v.optional(v.string()), // text content for small files / generated files
+      uploadedBy: v.id("users"),
+      uploadedByName: v.string(),
+      createdAt: v.number(),
+      isGenerated: v.optional(v.boolean()), // true if agent created this file
+    })
+      .index("by_session", ["sessionId"])
+      .index("by_session_created", ["sessionId", "createdAt"]),
   },
   {
     schemaValidation: false,

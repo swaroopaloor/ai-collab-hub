@@ -335,9 +335,17 @@ export default function Session() {
   const driverSetParticipantRoleMut = useMutation(api.sessions.driverSetParticipantRole);
   const deleteSessionMut = useMutation(api.sessions.deleteSession);
   const setSessionModelMut = useMutation(api.sessions.setSessionModel);
+  const generateUploadUrl = useMutation(api.files.generateUploadUrl);
+  const saveFileMut = useMutation(api.files.saveFile);
+  const sessionFiles = useQuery(
+    api.files.listSessionFiles,
+    sessionId ? { sessionId: sessionId as never } : "skip"
+  );
 
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   // Time travel: null = live edge, otherwise index into the events array.
   const [viewIndex, setViewIndex] = useState<number | null>(null);
@@ -527,6 +535,62 @@ export default function Session() {
       toast.error(err instanceof Error ? err.message : "Failed to send");
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !sessionId) return;
+
+    setUploadingFile(true);
+    try {
+      // Read file content for text files
+      let content: string | undefined;
+      if (file.type.startsWith("text/") || file.name.endsWith(".md") || file.name.endsWith(".json") || file.name.endsWith(".csv") || file.name.endsWith(".py") || file.name.endsWith(".js") || file.name.endsWith(".ts") || file.name.endsWith(".txt")) {
+        content = await file.text();
+      }
+
+      // For small text files, store content directly. For larger files, use storage.
+      if (content && content.length < 100000) {
+        await saveFileMut({
+          sessionId: sessionId as never,
+          name: file.name,
+          mimeType: file.type || "text/plain",
+          size: file.size,
+          storageId: "inline",
+          content,
+        });
+      } else {
+        // Upload to Convex storage
+        const uploadUrl = await generateUploadUrl();
+        const result = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": file.type },
+          body: file,
+        });
+        const { storageId } = await result.json();
+        await saveFileMut({
+          sessionId: sessionId as never,
+          name: file.name,
+          mimeType: file.type || "application/octet-stream",
+          size: file.size,
+          storageId,
+          content: content?.slice(0, 50000), // Store first 50k chars for agent access
+        });
+      }
+
+      // Post a message about the file
+      await postMessage({
+        sessionId: sessionId as never,
+        content: `📎 Uploaded file: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`,
+      });
+
+      toast.success(`File "${file.name}" uploaded`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploadingFile(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -1352,6 +1416,51 @@ export default function Session() {
                 </span>
               </div>
             )}
+            {/* Uploaded files list */}
+            {sessionFiles && sessionFiles.length > 0 && (
+              <div className="mx-auto mb-2 flex max-w-2xl flex-wrap gap-2">
+                {sessionFiles.map((f) => (
+                  <div
+                    key={f._id}
+                    className="nb-border flex items-center gap-2 bg-secondary px-3 py-1.5 text-xs"
+                  >
+                    <span className="font-mono font-bold">{f.name}</span>
+                    <span className="text-muted-foreground">({(f.size / 1024).toFixed(1)}KB)</span>
+                    {f.url ? (
+                      <a
+                        href={f.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline"
+                      >
+                        Download
+                      </a>
+                    ) : f.content ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const blob = new Blob([f.content!], { type: f.mimeType });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = f.name;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        }}
+                        className="text-primary underline"
+                      >
+                        Download
+                      </button>
+                    ) : null}
+                    {f.isGenerated && (
+                      <span className="rounded bg-primary/20 px-1 py-px text-[10px] font-bold text-primary">
+                        AI
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             <form
               className="mx-auto flex max-w-2xl gap-2"
               onSubmit={(e) => {
@@ -1409,6 +1518,33 @@ export default function Session() {
                 }
                 className="nb-border h-9 sm:h-10 flex-1 bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus:shadow-[2px_2px_0_0_#111] dark:focus:shadow-[2px_2px_0_0_#f5f5f0]"
               />
+              {/* File upload button */}
+              {canPost && !timeTraveling && (
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                  accept=".txt,.md,.json,.csv,.py,.js,.ts,.jsx,.tsx,.html,.css,.yaml,.yml,.xml,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.tar,.gz"
+                />
+              )}
+              {canPost && !timeTraveling && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="nb-border h-9 sm:h-10"
+                  disabled={uploadingFile}
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Upload file"
+                >
+                  {uploadingFile ? (
+                    <span className="animate-spin">⏳</span>
+                  ) : (
+                    <span>📎</span>
+                  )}
+                </Button>
+              )}
               {canPost && !timeTraveling ? (
                 <Button
                   type="submit"
