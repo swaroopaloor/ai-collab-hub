@@ -874,7 +874,13 @@ export const internalSetActivity = internalMutation({
   handler: async (ctx, { sessionId, label, state }) => {
     const patch: Record<string, unknown> = {};
     if (label !== undefined) patch.agentActivity = label;
-    if (state !== undefined) patch.state = state;
+    if (state !== undefined) {
+      patch.state = state;
+      // Clear agent activity when agent finishes or pauses.
+      if (state === "awaiting_input" || state === "paused" || state === "done") {
+        patch.agentActivity = undefined;
+      }
+    }
     if (Object.keys(patch).length > 0)
       await ctx.db.patch(sessionId, patch as never);
   },

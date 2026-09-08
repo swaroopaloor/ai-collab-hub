@@ -473,8 +473,8 @@ export default function Session() {
   const displayState = historicalState ?? session?.state ?? "awaiting_input";
   const agentActive =
     !timeTraveling &&
-    (displayState === "running" ||
-      (!!session?.agentActivity && displayState !== "paused"));
+    displayState === "running" &&
+    !!session?.agentActivity;
 
   // --- Join approval banner (driver sees pending requests) ---
   const showJoinBanner = (myRole === "driver" || session?.createdBy === myPart?.userId) && !timeTraveling;

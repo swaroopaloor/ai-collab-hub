@@ -32,7 +32,14 @@ export function setLastSeen(sessionId: string) {
 }
 
 export default function AwayBriefing({ sessionId }: { sessionId: string }) {
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(() => {
+    // Restore dismissed state from localStorage so it doesn't reappear on re-render.
+    try {
+      return localStorage.getItem(`mp_dismissed_${sessionId}`) === "1";
+    } catch {
+      return false;
+    }
+  });
   const lastSeen = getLastSeen(sessionId);
 
   // Only show the briefing if the user was away for more than 2 minutes.
@@ -41,7 +48,7 @@ export default function AwayBriefing({ sessionId }: { sessionId: string }) {
 
   const briefing = useQuery(
     api.sessions.getAwayBriefing,
-    sessionId && awayLongEnough
+    sessionId && awayLongEnough && !dismissed
       ? { sessionId: sessionId as never, lastSeenAt: lastSeen }
       : "skip",
   ) as Briefing;
@@ -63,7 +70,14 @@ export default function AwayBriefing({ sessionId }: { sessionId: string }) {
           <h3 className="text-sm font-black uppercase">While you were away</h3>
         </div>
         <button
-          onClick={() => setDismissed(true)}
+          onClick={() => {
+            setDismissed(true);
+            try {
+              localStorage.setItem(`mp_dismissed_${sessionId}`, "1");
+            } catch {
+              // ignore
+            }
+          }}
           className="text-muted-foreground hover:text-foreground"
         >
           <X className="size-4" />
