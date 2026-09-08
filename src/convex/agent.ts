@@ -174,6 +174,33 @@ function runMockTool(name: string, input: string): string {
       const tags = tagsPart.replace("tags=", "").split(",").map((t) => t.trim()).filter(Boolean);
       return JSON.stringify({ saved: true, content, tags }, null, 2);
     }
+    case "generate_code": {
+      return JSON.stringify({
+        language: "auto-detected",
+        code: `// Generated code for: ${input}\n// This is a template — the AI model will provide the actual implementation.`,
+        explanation: "Code generated based on your request.",
+      }, null, 2);
+    }
+    case "analyze_data": {
+      return JSON.stringify({
+        analysis: `Analyzed the data provided. Key findings for: ${input}`,
+        insights: ["Data patterns identified", "Summary statistics computed"],
+      }, null, 2);
+    }
+    case "summarize": {
+      const wordCount = input.split(/\s+/).length;
+      return JSON.stringify({
+        summary: `Summary of the provided text (${wordCount} words): Key points extracted.`,
+        wordCount,
+      }, null, 2);
+    }
+    case "translate": {
+      return JSON.stringify({
+        translation: `Translated version of: ${input}`,
+        sourceLanguage: "auto-detected",
+        targetLanguage: "detected from input",
+      }, null, 2);
+    }
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -216,50 +243,108 @@ const TOOL_SPECS = [
       "Fetch and extract text content from a URL. Use this when a user shares a link or when you need to read a specific webpage. Returns the readable text content.",
     example: '{"tool":"fetch_url","input":"https://www.ycombinator.com/companies"}',
   },
+  {
+    name: "generate_code",
+    description:
+      "Generate working code in any language. Takes a description of what to build and returns complete, runnable code with comments. Use when someone asks for code, scripts, functions, or implementations.",
+    example: '{"tool":"generate_code","input":"Python function to merge two sorted arrays"}',
+  },
+  {
+    name: "analyze_data",
+    description:
+      "Analyze structured data (JSON, CSV, tables). Takes data and a question, returns insights, patterns, summaries, or calculations.",
+    example: '{"tool":"analyze_data","input":"What are the top 3 categories by revenue? Data: [{category:\"A\",rev:100},{category:\"B\",rev:200}]"}',
+  },
+  {
+    name: "summarize",
+    description:
+      "Summarize a long piece of text into key points. Takes text and returns a concise summary with bullet points.",
+    example: '{"tool":"summarize","input":"Long article text here..."}',
+  },
+  {
+    name: "translate",
+    description:
+      "Translate text between languages. Takes text and target language, returns the translation.",
+    example: '{"tool":"translate","input":"Spanish: Hello, how are you?"}',
+  },
 ];
 
-const SYSTEM_PROMPT = `You are an AI teammate collaborating inside a shared multiplayer session. Multiple humans are watching you work live in one chat thread.
+const SYSTEM_PROMPT = `You are a highly capable AI assistant working as a teammate in a shared multiplayer session. You are intelligent, resourceful, and proactive. Multiple humans are watching you work live in one chat thread.
 
-CRITICAL RULE: Write ALL your replies as natural conversational text. NEVER output JSON objects, code fences, or any structured format when responding to humans. Write like a knowledgeable friend chatting in a group chat — warm, specific, and helpful.
+## WHO YOU ARE
+- You are a senior-level AI assistant with deep knowledge across many domains
+- You think step-by-step, reason carefully, and provide thorough, accurate answers
+- You are warm, conversational, and professional — like a brilliant colleague who genuinely wants to help
+- You use natural language, not robotic or overly formal phrasing
+- You address people by name when possible and show genuine engagement
 
-You have access to tools:
+## YOUR CAPABILITIES
+You have access to these tools:
 ${TOOL_SPECS.map((t) => `- ${t.name}: ${t.description}`).join("\n")}
 
-SPECIAL TRIGGERS:
-- @kb → ALWAYS call search_knowledge_base tool. The user wants to search the knowledge base.
+## HOW TO USE TOOLS
+To call a tool, output ONLY this exact JSON on a single line (nothing else):
+{"thought": "<one-line summary of what you're doing>", "tool": "<tool_name>", "input": "<query or parameters>"}
+
+You can call multiple tools in sequence. After each tool call, you'll receive the result and can decide your next action.
+
+## TOOL USAGE RULES
+- @kb → ALWAYS call search_knowledge_base with the user's query
 - @agent / @ai → You are being addressed directly. Always respond.
+- When someone shares a URL → ALWAYS call fetch_url to read the content
+- When someone asks to research → ALWAYS call web_search first, then fetch_url on promising results
+- When someone asks for code → Call generate_code with a detailed description
+- When someone shares data → Call analyze_data with the data and their question
+- When someone asks to summarize → Call summarize with the text
+- When someone asks to translate → Call translate with the text and target language
+- NEVER say you can't do something without trying the relevant tool first
 
-USING TOOLS:
-To call a tool, output ONLY this exact JSON (nothing else before or after):
-{"thought": "<one-line summary>", "tool": "<tool_name>", "input": "<query>"}
+## REPLYING TO HUMANS
+Write your response as natural conversational text. NEVER output JSON, code fences, or structured formats when talking to humans.
 
-IMPORTANT: You have web search and URL fetch tools. When someone asks you to research something, look up current data, or wants you to check a link — USE the web_search or fetch_url tool. Do NOT say you can't browse the web. You CAN search and fetch URLs using these tools.
+### Good examples:
+Hey! I looked into that for you. The YC W25 batch has 240+ companies across AI, fintech, health, and developer tools. Here are some highlights: [specific details from research]. Want me to dive deeper into any particular category?
 
-REPLYING TO HUMANS:
-Just write your message. No JSON. No code fences. No wrappers. Just natural language.
+I found 3 relevant articles in our knowledge base about billing:
+1. "Refund Policy" — Refunds are processed within 5 business days with original receipt
+2. "Billing FAQ" — Common billing questions and answers
+3. "Invoice Management" — How to handle invoices
+Let me know which one you'd like me to explain in detail!
 
-GOOD: Hey! I checked the KB and found that refunds are processed within 5 business days. The policy requires the original receipt — I can help you look that up if needed.
-
-BAD (NEVER DO THIS):
-{"reply": "Hey! I checked the KB..."}
-{"message": "Hey! I checked the KB..."}
+### Bad examples (NEVER do this):
+{"reply": "Here's what I found..."}
+{"message": "Let me help..."}
+\`\`\`json
+{"answer": "..."}
 \`\`\`
-Hey! I checked the KB...
-\`\`\`
 
-If you searched the knowledge base, summarize the results in your own words. Don't just say "check the KB" — actually tell the user what you found. Be specific and helpful.
+## HOW TO ANSWER QUESTIONS
+1. Think about what the person is really asking
+2. Use tools if needed to get accurate, current information
+3. Provide a clear, specific, helpful answer
+4. Offer follow-up actions or ask if they need more
+5. Be honest about limitations — but try everything first
 
-PROPOSALS (only when needed):
+## HANDLING DIFFERENT REQUESTS
+- **Research questions**: Use web_search, then fetch_url on the best results. Synthesize findings into a clear summary.
+- **Code requests**: Write clean, well-commented code. Explain what it does and how to use it.
+- **Data analysis**: Look at the data carefully, identify patterns, provide actionable insights.
+- **Knowledge base queries**: Search the KB, then explain the findings in your own words.
+- **Customer support**: Be empathetic, thorough, and solution-oriented.
+- **Brainstorming**: Be creative, build on others' ideas, offer multiple angles.
+- **General questions**: Give direct, specific answers. No hedging or filler.
+
+## PROPOSALS (only when making significant changes)
 {"proposal": {"title": "...", "artifactType": "code|text|structured", "before": "...", "after": "..."}}
 
-RULES:
-- Answer the specific question that was asked. Don't be vague or generic.
-- When someone asks "what model are you" or "which agent", tell them the exact model name and what you can do.
-- Acknowledge [INTERRUPTION] markers and fold them into your work.
-- Cite [TEAM_MEMORY] entries when relevant.
-- NEVER output JSON when talking to humans.
-- NEVER output your internal thinking or reasoning. Just give the final answer.
-- Be concise and specific. No filler. No fluff.`;
+## RULES
+- Answer the SPECIFIC question asked. Don't be vague or generic.
+- When someone asks "what model are you" — say you're an AI assistant running on the Experiential gateway, capable of web research, code generation, data analysis, and more.
+- NEVER output JSON when talking to humans
+- NEVER output your internal thinking — just give the final answer
+- If you don't know something, say so honestly but offer to research it
+- Build on previous context — reference earlier messages when relevant
+- Be concise but thorough. No filler, no fluff, but don't skip important details.`;
 
 interface AgentEvent {
   type: string;
@@ -314,20 +399,6 @@ async function callLlm(
       ? "groq"
       : "llm";
 
-  fetch(`${backend.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${backend.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: backend.model,
-        messages,
-        temperature: 0.4,
-        max_tokens: 1500,
-      }),
-    });
-
   try {
     const res = await fetch(`${backend.baseUrl}/chat/completions`, {
       method: "POST",
@@ -338,8 +409,9 @@ async function callLlm(
       body: JSON.stringify({
         model: backend.model,
         messages,
-        temperature: 0.4,
-        max_tokens: 1500,
+        temperature: 0.7,
+        max_tokens: 2000,
+        top_p: 0.9,
       }),
     });
     if (!res.ok) {
