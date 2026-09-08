@@ -185,9 +185,12 @@ PROPOSALS (only when needed):
 {"proposal": {"title": "...", "artifactType": "code|text|structured", "before": "...", "after": "..."}}
 
 RULES:
+- Answer the specific question that was asked. Don't be vague or generic.
+- When someone asks "what model are you" or "which agent", tell them the exact model name and what you can do.
 - Acknowledge [INTERRUPTION] markers and fold them into your work.
 - Cite [TEAM_MEMORY] entries when relevant.
 - NEVER output JSON when talking to humans.
+- NEVER output your internal thinking or reasoning. Just give the final answer.
 - Be concise and specific. No filler. No fluff.`;
 
 interface AgentEvent {
@@ -472,7 +475,7 @@ function salvageReply(text: string): string | null {
   }
 
   // Step 4: Strip protocol prefixes and return whatever's left.
-  const stripped = cleaned
+  let stripped = cleaned
     .replace(/^(?:Thought|Thought:|Tool|Reply|Response|Answer):\s*/i, "")
     .trim();
 
@@ -483,7 +486,23 @@ function salvageReply(text: string): string | null {
     if (match) return match[1];
   }
 
-  return stripped || null;
+  // Step 5: Strip thinking/reasoning patterns from reasoning models.
+  // These models output internal reasoning before the actual answer.
+  // Pattern: "The human/user is asking..." or "I should..." or "Let me..."
+  stripped = stripped
+    .replace(/^(?:The (?:human|user) is (?:asking|requesting|wondering|wanting)[^.]*\.\s*)/i, "")
+    .replace(/^(?:I (?:should|need to|will|must|can)[^.]*\.\s*)/i, "")
+    .replace(/^(?:Let me (?:think|consider|check|look|analyze|explain)[^.]*\.\s*)/i, "")
+    .replace(/^(?:Based on the (?:context|conversation|question|message)[^.]*\.\s*)/i, "")
+    .replace(/^(?:Since (?:the|this|they|the user|the human)[^.]*\.\s*)/i, "")
+    .replace(/^(?:The (?:user|human|person|someone) (?:is|was|has|wants|needs|asked)[^.]*\.\s*)/i, "")
+    .replace(/^(?:\w+ is (?:asking|requesting|wondering)[^.]*\.\s*)/i, "")
+    .trim();
+
+  // If we stripped everything and nothing's left, return null.
+  if (!stripped || stripped.length < 5) return null;
+
+  return stripped;
 }
 
 /** Detect if the model output is a tool-call JSON object.
@@ -583,7 +602,7 @@ export const runTurn = internalAction({
 
         conversation.push({
           role: "user",
-          content: `Session timeline so far:\n${renderThread(events)}\n\nThe humans are waiting for you, ${AGENT_NAME}.${interruptionNote}\nRespond with your single JSON object now.`,
+          content: `Session timeline so far:\n${renderThread(events)}\n\nThe humans are waiting for your reply, ${AGENT_NAME}.${interruptionNote}\nWrite your response as a natural conversational message. Do NOT output JSON.`,
         });
 
         await ctx.runMutation(internal.sessions.internalSetActivity, {

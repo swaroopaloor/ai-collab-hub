@@ -35,9 +35,13 @@ export default function AwayBriefing({ sessionId }: { sessionId: string }) {
   const [dismissed, setDismissed] = useState(false);
   const lastSeen = getLastSeen(sessionId);
 
+  // Only show the briefing if the user was away for more than 2 minutes.
+  // This prevents it from flashing when the user just refreshes the page.
+  const awayLongEnough = lastSeen > 0 && (Date.now() - lastSeen) > 2 * 60 * 1000;
+
   const briefing = useQuery(
     api.sessions.getAwayBriefing,
-    sessionId && lastSeen > 0
+    sessionId && awayLongEnough
       ? { sessionId: sessionId as never, lastSeenAt: lastSeen }
       : "skip",
   ) as Briefing;
