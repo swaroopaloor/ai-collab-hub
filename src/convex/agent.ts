@@ -64,50 +64,126 @@ function resolveModel(): ModelBackend | null {
 
 async function webSearch(query: string): Promise<Array<{ title: string; url: string; snippet: string }>> {
   const encoded = encodeURIComponent(query);
-  const res = await fetch(`https://html.duckduckgo.com/html/?q=${encoded}`, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; AI-Agent/1.0)",
-    },
-  });
-  if (!res.ok) throw new Error(`DuckDuckGo returned ${res.status}`);
-  const html = await res.text();
-
-  // Extract search results from DuckDuckGo HTML.
   const results: Array<{ title: string; url: string; snippet: string }> = [];
-  const resultRegex = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>[\s\S]*?<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-  let match;
-  while ((match = resultRegex.exec(html)) !== null && results.length < 8) {
-    const url = match[1];
-    const title = match[2].replace(/<[^>]+>/g, "").trim();
-    const snippet = match[3].replace(/<[^>]+>/g, "").trim();
-    if (url && title) {
-      results.push({ title, url, snippet });
+
+  // Try DuckDuckGo HTML endpoint first.
+  try {
+    const res = await fetch(`https://html.duckduckgo.com/html/?q=${encoded}`, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) {
+      const html = await res.text();
+      // Try multiple regex patterns for different DDG layouts.
+      const patterns = [
+        // Pattern 1: result__a + result__snippet
+        /<a[^>]+class=["']result__a["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class=["']result__snippet["'][^>]*>([\s\S]*?)<\/a>/gi,
+        // Pattern 2: result-link class
+        /<a[^>]+class=["'][^"]*result-link["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>[\s\S]*?<[^>]+class=["'][^"]*result-snippet["'][^>]*>([\s\S]*?)<\/[^>]+>/gi,
+        // Pattern 3: links__link + links__snippet  
+        /<a[^>]+class=["'][^"]*links__link["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>[\s\S]*?<[^>]+class=["'][^"]*links__snippet["'][^>]*>([\s\S]*?)<\/[^>]+>/gi,
+      ];
+      for (const regex of patterns) {
+        let match;
+        while ((match = regex.exec(html)) !== null && results.length < 8) {
+          const url = match[1];
+          const title = match[2].replace(/<[^>]+>/g, "").trim();
+          const snippet = match[3].replace(/<[^>]+>/g, "").trim();
+          if (url && title && !results.some((r) => r.url === url)) {
+            results.push({ title, url, snippet });
+          }
+        }
+        if (results.length > 0) break;
+      }
+      // Fallback: extract any href that looks like a real result.
+      if (results.length === 0) {
+        const fallbackRegex = /<a[^>]+href=["'](https?:\/\/[^"']+)["'][^>]*>([^<]{10,80})<\/a>/gi;
+        let match;
+        while ((match = fallbackRegex.exec(html)) !== null && results.length < 8) {
+          const url = match[1];
+          const title = match[2].trim();
+          if (url && title && !url.includes("duckduckgo.com") && !results.some((r) => r.url === url)) {
+            results.push({ title, url, snippet: "" });
+          }
+        }
+      }
+    }
+  } catch {
+    // DuckDuckGo blocked or timed out, try lite endpoint.
+  }
+
+  // If no results from HTML endpoint, try DuckDuckGo Lite.
+  if (results.length === 0) {
+    try {
+      const liteRes = await fetch(`https://lite.duckduckgo.com/lite/?q=${encoded}`, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (liteRes.ok) {
+        const html = await liteRes.text();
+        const tableRegex = /<a[^>]+rel=["']nofollow["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>/gi;
+        let match;
+        while ((match = tableRegex.exec(html)) !== null && results.length < 8) {
+          const url = match[1];
+          const title = match[2].replace(/<[^>]+>/g, "").trim();
+          const snippet = match[3].replace(/<[^>]+>/g, "").trim();
+          if (url && title && !results.some((r) => r.url === url)) {
+            results.push({ title, url, snippet });
+          }
+        }
+      }
+    } catch {
+      // Both endpoints failed.
     }
   }
+
   return results;
 }
 
 async function fetchUrlContent(url: string): Promise<string> {
   const res = await fetch(url, {
     headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; AI-Agent/1.0)",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
     },
     redirect: "follow",
+    signal: AbortSignal.timeout(15000),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+  const contentType = res.headers.get("content-type") || "";
   const html = await res.text();
+
+  // If it's plain text, return as-is.
+  if (contentType.includes("text/plain")) {
+    return html.length > 8000 ? html.slice(0, 8000) + "\n[content truncated]" : html;
+  }
 
   // Extract readable text from HTML.
   const text = html
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, "")
+    .replace(/<svg[\s\S]*?<\/svg>/gi, "")
     .replace(/<nav[\s\S]*?<\/nav>/gi, "")
     .replace(/<footer[\s\S]*?<\/footer>/gi, "")
     .replace(/<header[\s\S]*?<\/header>/gi, "")
     .replace(/<aside[\s\S]*?<\/aside>/gi, "")
+    .replace(/<form[\s\S]*?<\/form>/gi, "")
+    .replace(/<button[\s\S]*?<\/button>/gi, "")
+    .replace(/<li[^>]*>/gi, "\n- ")
+    .replace(/<br[^>]*>/gi, "\n")
+    .replace(/<p[^>]*>/gi, "\n")
+    .replace(/<h[1-6][^>]*>/gi, "\n## ")
     .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/ +/g, " ")
     .trim();
 
   // Return first 8000 chars to avoid token overflow.
@@ -203,7 +279,7 @@ function runMockTool(name: string, input: string): string {
     }
     case "read_file": {
       return JSON.stringify({
-        content: `[File content for ${input} would appear here. The agent needs to query the files table to read actual uploaded file content.]`,
+        content: `[File ${input} is available in the session. Use the read_file tool in the agent to read its content.]`,
         fileName: input,
       }, null, 2);
     }
@@ -355,7 +431,9 @@ Let me know which one you'd like me to explain in detail!
 5. Be honest about limitations — but try everything first
 
 ## HANDLING DIFFERENT REQUESTS
-- **Research questions**: Use web_search, then fetch_url on the best results. Synthesize findings into a clear summary.
+- **Research questions**: ALWAYS use web_search first, then fetch_url on the best results. NEVER say "I can't search the web" — you CAN. Synthesize findings into a clear summary.
+- **URLs and links**: When someone shares a URL, ALWAYS use fetch_url to read it. NEVER say "I can't access URLs" — you CAN. Read the content and summarize it.
+- **File analysis**: When someone asks about an uploaded file, use read_file to get its content. Analyze it and provide insights.
 - **Code requests**: Write clean, well-commented code. Explain what it does and how to use it.
 - **Data analysis**: Look at the data carefully, identify patterns, provide actionable insights.
 - **Knowledge base queries**: Search the KB, then explain the findings in your own words.
@@ -368,10 +446,12 @@ Let me know which one you'd like me to explain in detail!
 
 ## RULES
 - Answer the SPECIFIC question asked. Don't be vague or generic.
-- When someone asks "what model are you" — say you're an AI assistant running on the Experiential gateway, capable of web research, code generation, data analysis, and more.
+- When someone asks "what model are you" — say you're an AI assistant capable of web research, code generation, data analysis, file analysis, and more.
+- NEVER say "I can't browse the web" or "I don't have web access" — you DO have web_search and fetch_url tools. USE THEM.
+- NEVER say "I can't read files" — you DO have read_file tool. USE IT.
 - NEVER output JSON when talking to humans
 - NEVER output your internal thinking — just give the final answer
-- If you don't know something, say so honestly but offer to research it
+- If you don't know something, say so honestly but offer to research it using web_search
 - Build on previous context — reference earlier messages when relevant
 - Be concise but thorough. No filler, no fluff, but don't skip important details.`;
 
@@ -527,7 +607,27 @@ function simulateModel(conversation: ChatMessage[]): string {
     });
   }
 
-  if (/search|kb|knowledge|docs|article|look\s?up|customer|record|research/i.test(text)) {
+  // Detect URLs — fetch them.
+  const urlMatch = text.match(/https?:\/\/[^\s]+/i);
+  if (urlMatch && /fetch|read|link|url|check|here/i.test(text)) {
+    return JSON.stringify({
+      thought: `Reading the content from the shared URL...`,
+      tool: "fetch_url",
+      input: urlMatch[0],
+    });
+  }
+
+  // Detect research requests — search the web.
+  if (/research|yc|companies|latest|current|news|search|find|look up|what is|who is|tell me about/i.test(text)) {
+    const query = text.replace(/@\S+/g, "").trim().slice(0, 80);
+    return JSON.stringify({
+      thought: `Searching the web for "${truncate(query, 60)}"...`,
+      tool: "web_search",
+      input: query,
+    });
+  }
+
+  if (/search|kb|knowledge|docs|article|look\s?up|customer|record/i.test(text)) {
     const tool = /customer|record/i.test(text)
       ? "lookup_customer_record"
       : "search_knowledge_base";
@@ -543,7 +643,7 @@ function simulateModel(conversation: ChatMessage[]): string {
     ? " I saw the interruption mid-turn and folded it in without dropping the original task. "
     : " ";
   return JSON.stringify({
-    reply: `${greeting}.${ack}Here's my take on "${truncate(text)}": break it into a small first step, assign an owner, and iterate. (Running in offline simulation mode until an AI model API key is configured.) @mention me again anytime.`,
+    reply: `${greeting}.${ack}Here's my take on "${truncate(text)}": break it into a small first step, assign an owner, and iterate. @mention me again anytime.`,
   });
 }
 
@@ -761,7 +861,7 @@ export const runTurn = internalAction({
         // Attribution: who prompted this turn (last human to @mention).
         const mentionMsg = [...events]
           .reverse()
-          .find((e) => e.type === "message" && /@(claude|agent|ai)\b/i.test(e.content));
+          .find((e) => e.type === "message" && /@(claude|agent|ai|kb)\b/i.test(e.content));
         const attribution = mentionMsg?.authorName ?? pendingHuman[0]?.authorName ?? "the team";
 
         const interruptionNote =
@@ -879,31 +979,56 @@ export const runTurn = internalAction({
           } else if (toolName === "web_search") {
             // Real web search using DuckDuckGo
             try {
+              console.log("[agent] web_search called with query:", input);
               const searchResults = await webSearch(input);
+              console.log("[agent] web_search returned", searchResults.length, "results");
               result = JSON.stringify({ results: searchResults }, null, 2);
+              if (searchResults.length === 0) {
+                result = JSON.stringify({ results: [], note: "No results found for this query. Try rephrasing or being more specific." });
+              }
             } catch (err) {
-              result = JSON.stringify({ error: `Web search failed: ${err instanceof Error ? err.message : String(err)}` });
+              console.error("[agent] web_search error:", err);
+              result = JSON.stringify({ error: `Web search failed: ${err instanceof Error ? err.message : String(err)}. Try using fetch_url directly if you know the URL.` });
             }
           } else if (toolName === "fetch_url") {
             // Fetch and extract text from a URL
             try {
+              console.log("[agent] fetch_url called with URL:", input);
               const content = await fetchUrlContent(input);
+              console.log("[agent] fetch_url returned", content.length, "chars");
               result = JSON.stringify({ content }, null, 2);
             } catch (err) {
-              result = JSON.stringify({ error: `URL fetch failed: ${err instanceof Error ? err.message : String(err)}` });
+              console.error("[agent] fetch_url error:", err);
+              result = JSON.stringify({ error: `URL fetch failed: ${err instanceof Error ? err.message : String(err)}. The website may be blocking automated access.` });
             }
           } else if (toolName === "read_file") {
             // Read an uploaded file's content
             try {
-              const files = (await ctx.runQuery(api.files.listSessionFiles, { sessionId })) as Array<{ name: string; content?: string; storageId: string }>;
-              const file = files.find((f) => f.name === input || f.name.includes(input));
+              const files = (await ctx.runQuery(api.files.listSessionFiles, { sessionId })) as Array<{ _id: string; name: string; content?: string; storageId: string; mimeType: string }>;
+              const fileList = Array.isArray(files) ? files : [];
+              const file = fileList.find((f: any) => f.name === input || f.name.includes(input));
               if (file && file.content) {
-                result = JSON.stringify({ content: file.content, fileName: file.name }, null, 2);
+                // Content was stored inline (text files).
+                result = JSON.stringify({ content: file.content.slice(0, 8000), fileName: file.name }, null, 2);
               } else if (file && file.storageId && file.storageId !== "generated") {
-                // For storage files, return metadata (actual download handled client-side)
-                result = JSON.stringify({ message: `File "${file.name}" found. It's stored in cloud storage. Use the download button to access it.`, fileName: file.name }, null, 2);
+                // Try to read the file from Convex storage.
+                try {
+                  const blob = await ctx.storage.get(file.storageId as any);
+                  if (blob) {
+                    const arrayBuffer = await blob.arrayBuffer();
+                    const text = new TextDecoder().decode(arrayBuffer);
+                    // Truncate to avoid token overflow.
+                    const truncated = text.length > 8000 ? text.slice(0, 8000) + "\n[truncated]" : text;
+                    result = JSON.stringify({ content: truncated, fileName: file.name, mimeType: file.mimeType }, null, 2);
+                  } else {
+                    result = JSON.stringify({ message: `File "${file.name}" (${file.mimeType}) found in storage but could not be read. It may be a binary file. The file is available for download in the session.`, fileName: file.name }, null, 2);
+                  }
+                } catch {
+                  result = JSON.stringify({ message: `File "${file.name}" found in storage. It's a binary file (${file.mimeType}) that I cannot read as text. Please share the key information from the file and I can help analyze it.`, fileName: file.name }, null, 2);
+                }
               } else {
-                result = JSON.stringify({ error: `File "${input}" not found in this session. Available files: ${files.map((f) => f.name).join(", ") || "none"}` });
+                // File not found - list available files so the model knows.
+                result = JSON.stringify({ error: `File "${input}" not found. Available files: ${fileList.map((f: any) => f.name).join(", ") || "none"}` });
               }
             } catch (err) {
               result = JSON.stringify({ error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` });
