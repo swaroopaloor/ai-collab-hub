@@ -1,6 +1,13 @@
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -225,6 +232,7 @@ export type SessionData = {
   forkedAtSeq?: number | null;
   parentTitle?: string | null;
   autonomousScope?: string | null;
+  model?: string;
   lastActivityAt?: number;
   handoffCount?: number;
   participants: Array<{
@@ -326,6 +334,7 @@ export default function Session() {
   const decideRoleChangeMut = useMutation(api.sessions.decideRoleChange);
   const driverSetParticipantRoleMut = useMutation(api.sessions.driverSetParticipantRole);
   const deleteSessionMut = useMutation(api.sessions.deleteSession);
+  const setSessionModelMut = useMutation(api.sessions.setSessionModel);
 
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -1324,6 +1333,39 @@ export default function Session() {
                 void handleSend();
               }}
             >
+              <Select
+                value={session.model ?? "gpt-5.6-luna"}
+                onValueChange={(val) => {
+                  void setSessionModelMut({
+                    sessionId: session._id as never,
+                    model: val,
+                  });
+                }}
+              >
+                <SelectTrigger className="nb-border h-9 sm:h-10 w-[140px] sm:w-[170px] bg-background text-xs font-bold" aria-label="AI model">
+                  <SelectValue placeholder="Model" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gpt-5.6-luna">
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
+                      GPT-5.6 Luna
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="deepseek-v4-flash">
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block size-1.5 rounded-full bg-blue-500" />
+                      DeepSeek V4 Flash
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="qwen3.8-27b">
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block size-1.5 rounded-full bg-violet-500" />
+                      Qwen 3.8 27B
+                    </span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
               <input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}

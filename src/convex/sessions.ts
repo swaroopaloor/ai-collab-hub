@@ -131,6 +131,7 @@ export const getSession = query({
         : null,
       // Autonomous operation
       autonomousScope: session.autonomousScope ?? null,
+      model: session.model ?? "gpt-5.6-luna",
       lastActivityAt: session.lastActivityAt ?? session.createdAt,
       handoffCount: session.handoffCount,
       participants: parts.map((p, i) => ({
@@ -680,6 +681,37 @@ export const setMyRole = mutation({
   },
 });
 
+export const setSessionModel = mutation({
+  args: {
+    sessionId: v.id("sessions"),
+    model: v.string(),
+  },
+  handler: async (ctx, { sessionId, model }) => {
+    const userId = await requireUserId(ctx);
+    const me = await ctx.db
+      .query("participants")
+      .withIndex("by_session_user", (q) =>
+        q.eq("sessionId", sessionId).eq("userId", userId),
+      )
+      .first();
+    if (!me) throw new Error("Not a participant");
+
+    const allowedModels = ["gpt-5.6-luna", "deepseek-v4-flash", "qwen3.8-27b"];
+    if (!allowedModels.includes(model))
+      throw new Error(`Invalid model. Allowed: ${allowedModels.join(", ")}`);
+
+    await ctx.db.patch(sessionId, { model } as never);
+    const user = await ctx.db.get(userId);
+    await appendEvent(ctx, sessionId, {
+      type: "system",
+      authorType: "human",
+      authorId: userId,
+      authorName: user?.name ?? user?.email ?? "Someone",
+      content: `switched AI model to ${model}.`,
+    });
+  },
+});
+
 export const setSessionState = mutation({
   args: {
     sessionId: v.id("sessions"),
@@ -761,6 +793,7 @@ export const forkSession = mutation({
       parentId: sessionId,
       forkedAtSeq: uptoSeq,
       handoffCount: 0,
+      model: parent.model ?? "gpt-5.6-luna",
     });
 
     // 2. Full state copy: participants keep their roles.

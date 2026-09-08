@@ -73,6 +73,8 @@ const schema = defineSchema(
       autonomousScope: v.optional(v.string()), // e.g. "full" | "research_only" | "off"
       lastActivityAt: v.optional(v.number()),
       handoffCount: v.number(),
+      // Selected AI model for this session (Experiential free tier).
+      model: v.optional(v.string()), // e.g. "gpt-5.6-luna" | "deepseek-v4-flash" | "qwen3.8-27b"
       // Time travel lineage: set when this session was forked from a parent.
       parentId: v.optional(v.id("sessions")),
       forkedAtSeq: v.optional(v.number()), // parent timeline position of the fork

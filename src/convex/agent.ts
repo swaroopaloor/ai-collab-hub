@@ -226,12 +226,14 @@ function renderThread(events: AgentEvent[]): string {
 
 async function callLlm(
   messages: ChatMessage[],
-  opts: { jsonMode?: boolean } = {},
+  opts: { jsonMode?: boolean; modelOverride?: string } = {},
 ): Promise<{ ok: boolean; text: string }> {
   const backend = resolveModel();
   if (!backend) {
     return { ok: false, text: "No AI model configured." };
   }
+  // Allow per-session model override.
+  if (opts.modelOverride) backend.model = opts.modelOverride;
   const label = backend.baseUrl.includes("experiential")
     ? "experiential"
     : backend.baseUrl.includes("groq")
@@ -384,10 +386,11 @@ function simulateSummary(sessionTitle: string, events: AgentEvent[]): string {
 
 async function askModel(
   conversation: ChatMessage[],
+  modelOverride?: string,
 ): Promise<{ ok: boolean; text: string }> {
   const backend = resolveModel();
   if (backend) {
-    const live = await callLlm(conversation, { jsonMode: true });
+    const live = await callLlm(conversation, { jsonMode: true, modelOverride });
     if (live.ok) return live;
     console.warn("[agent] falling back to offline simulation:", live.text);
   }
@@ -473,6 +476,9 @@ function parseModelJson(text: string): Record<string, unknown> | null {
 export const runTurn = internalAction({
   args: { sessionId: v.id("sessions") },
   handler: async (ctx, { sessionId }) => {
+    // Read the session's selected AI model.
+    const sessionForModel = await ctx.runQuery(api.sessions.getSession, { sessionId });
+    const modelOverride = sessionForModel?.model ?? undefined;
     const conversation: ChatMessage[] = [
       { role: "system", content: SYSTEM_PROMPT },
     ];
@@ -554,7 +560,7 @@ export const runTurn = internalAction({
           state: "running",
         });
 
-        const { ok, text } = await askModel(conversation);
+        const { ok, text } = await askModel(conversation, modelOverride);
         if (!ok) {
           await ctx.runMutation(internal.sessions.internalAppendEvent, {
             sessionId,
